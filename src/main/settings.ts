@@ -10,7 +10,9 @@ export const HOST = app.isPackaged ? 'https://foxlogi.com' : 'http://localhost:5
 const DEFAULTS: AppSettings = {
   host: HOST,
   displayId: null,
-  toggleHotkey: 'Alt+Z',
+  // Alt+Z is claimed by the NVIDIA overlay on many Windows machines; Alt+X is
+  // rarely contested.
+  toggleHotkey: 'Alt+X',
   ingestHotkey: 'Alt+Shift+S',
   disableHardwareAcceleration: false
 }

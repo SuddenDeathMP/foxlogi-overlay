@@ -50,7 +50,7 @@ Layout uses three "safe zones" (top banner / left / bottom strip) defined as dis
 ### Other main-process pieces
 
 - **Settings** (`src/main/settings.ts`): persisted to `userData/config.json`. The backend host is **fixed per build** (`https://foxlogi.com` packaged, `http://localhost:5173` dev) and force-overrides anything persisted — not user-configurable.
-- **Global hotkeys** (`src/main/hotkeys.ts`): toggle UI collapse (default `Alt+Z`) and clipboard ingest (default `Alt+Shift+S`). Registration can fail if the game owns the combo; failures are pushed to the renderer as a warning, never silently ignored.
+- **Global hotkeys** (`src/main/hotkeys.ts`): toggle UI collapse (default `Alt+X`) and clipboard ingest (default `Alt+Shift+S`). Registration can fail if the game owns the combo; failures are pushed to the renderer as a warning, never silently ignored.
 - **Clipboard ingest** (`src/main/clipboard/ingest.ts`): parses the game's stockpile clipboard export (TSV, tolerates CSV), detects the source type by row count, and pushes the parsed result to the renderer's `IngestSheet`.
 - **Auto-update** (`src/main/updater.ts`): electron-updater against the `publish` target in `electron-builder.yml`.
 

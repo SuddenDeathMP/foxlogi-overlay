@@ -1,6 +1,6 @@
 {
   "name": "foxlogi-overlay",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Foxhole Logistics in-game overlay (Logistics, Bunker Supply, Pilot Missions)",
   "author": "FoxholeLogistics",
   "license": "Apache-2.0",

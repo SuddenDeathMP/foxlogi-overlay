@@ -15,8 +15,8 @@ export function isInteractive(): boolean {
 }
 
 function applyBounds(win: BrowserWindow, display: Display): void {
-  const { x, y } = display.workArea
-  const { width, height } = display.workArea
+  const { x, y } = display.bounds
+  const { width, height } = display.bounds
   win.setBounds({ x, y, width, height })
 }
 
@@ -24,10 +24,13 @@ export function createOverlayWindow(): BrowserWindow {
   const display = targetDisplay()
 
   overlay = new BrowserWindow({
-    x: display.workArea.x,
-    y: display.workArea.y,
-    width: display.workArea.width,
-    height: display.workArea.height,
+    // Full display bounds, not workArea: the game runs borderless over the
+    // whole screen, so the overlay must cover OS-reserved strips (Windows
+    // taskbar, macOS menu bar/Dock) too.
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
     frame: false,
     transparent: true,
     resizable: false,

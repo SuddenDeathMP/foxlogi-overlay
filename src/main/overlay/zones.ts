@@ -16,8 +16,9 @@ export function targetDisplay(): Display {
 export function currentZones(): ResolvedZones {
   const d = targetDisplay()
   // Work in logical pixels (DIPs) — Electron windows are sized in DIPs, so this
-  // scales correctly across HiDPI displays.
-  return resolveZones(d.workArea.width, d.workArea.height)
+  // scales correctly across HiDPI displays. Full bounds (not workArea) so the
+  // zones match the window, which covers the taskbar/menu-bar area too.
+  return resolveZones(d.bounds.width, d.bounds.height)
 }
 
 export function listDisplays(): Array<{ id: number; label: string; primary: boolean }> {

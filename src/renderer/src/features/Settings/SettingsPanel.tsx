@@ -59,7 +59,7 @@ export default function SettingsPanel({ open, onClose }: Props): React.ReactElem
           />
         </Form.Item>
         <Form.Item name="toggleHotkey" label="Toggle hotkey" extra="Show/hide the overlay UI.">
-          <Input placeholder="Alt+Z" />
+          <Input placeholder="Alt+X" />
         </Form.Item>
         <Form.Item name="ingestHotkey" label="Stockpile ingest hotkey">
           <Input placeholder="Alt+Shift+S" />

@@ -41,7 +41,7 @@ launcher button.
 
 Global hotkeys (configurable in Settings):
 
-- `Alt+Z` — show/hide the overlay UI
+- `Alt+X` — show/hide the overlay UI
 - `Alt+Shift+S` — ingest a stockpile from the clipboard: open a stockpile in
   game, copy it, press the hotkey, and the overlay parses the export and posts
   it to the backend
