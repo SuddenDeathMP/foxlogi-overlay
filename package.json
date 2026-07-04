@@ -1,0 +1,39 @@
+{
+  "name": "foxlogi-overlay",
+  "version": "0.1.0",
+  "description": "Foxhole Logistics in-game overlay (Logistics, Bunker Supply, Pilot Missions)",
+  "author": "FoxholeLogistics",
+  "license": "MIT",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "start": "electron-vite preview",
+    "pack:win": "electron-vite build && electron-builder --win --config electron-builder.yml",
+    "pack:mac": "electron-vite build && electron-builder --mac --config electron-builder.yml",
+    "pack:linux": "electron-vite build && electron-builder --linux --config electron-builder.yml"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "@vitejs/plugin-react": "^5.0.0",
+    "antd": "^6.0.0",
+    "electron": "^33.2.0",
+    "electron-builder": "^26.0.0",
+    "electron-vite": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0",
+    "zustand": "^5.0.2"
+  }
+}

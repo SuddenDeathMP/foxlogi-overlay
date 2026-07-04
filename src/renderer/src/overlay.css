@@ -1,0 +1,100 @@
+/* The window itself is transparent; only zones paint. Everything is
+   pointer-events:none by default so the game receives the mouse; interactive
+   surfaces opt back in with .interactive. */
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+  user-select: none;
+}
+
+#root {
+  pointer-events: none;
+}
+
+/* Zones always accept pointer events: the window itself is click-through
+   (setIgnoreMouseEvents + forward), and hovering a zone flips it interactive. */
+.overlay-zone {
+  position: absolute;
+  pointer-events: auto;
+  transform-origin: 0 0;
+  transition:
+    opacity 0.45s ease,
+    transform 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    visibility 0.5s;
+}
+
+/* Collapsed state: zones fly toward the mini launcher (offset provided per
+   zone via --collapse-x/y) while shrinking, then the launcher pops in. */
+.overlay-zone.zone-hidden {
+  opacity: 0;
+  transform: translate(var(--collapse-x, 0px), var(--collapse-y, 0px)) scale(0.03);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.mini-launcher {
+  position: absolute;
+  pointer-events: auto;
+  transition:
+    opacity 0.4s ease 0.4s,
+    transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) 0.3s,
+    visibility 0.5s 0.4s;
+}
+.mini-launcher.zone-hidden {
+  opacity: 0;
+  transform: scale(0.3);
+  visibility: hidden;
+  pointer-events: none;
+  /* Reverse direction (expanding): get out of the way immediately. */
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0.16s;
+}
+
+.zone-surface {
+  background: rgba(18, 21, 25, 0.6);
+  border: 1px solid rgba(36, 42, 49, 0.4);
+  border-radius: 8px;
+  backdrop-filter: blur(2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.interactive-tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px rgba(224, 176, 112, 0.55);
+  border-radius: 2px;
+}
+
+.scroll-y {
+  overflow-y: auto;
+  height: 100%;
+}
+
+/* Slim dark scrollbars everywhere (drawer bodies, panels, sheets). */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #2f363f;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #494f57;
+}
