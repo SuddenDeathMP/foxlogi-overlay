@@ -1,0 +1,42 @@
+# Build installers for all three platforms and attach them to a GitHub Release.
+# Trigger: push a tag like v0.1.0 (should match the version in package.json).
+# electron-builder creates the release as a DRAFT — review and publish it on
+# GitHub after the workflow finishes.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm run build
+
+      - name: Package and publish
+        run: npx electron-builder --publish always --config electron-builder.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No signing certificates in CI: build unsigned instead of failing
+          # while electron-builder looks for an identity (macOS).
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
