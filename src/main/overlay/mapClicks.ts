@@ -27,9 +27,9 @@ function onRightDown(): void {
 /**
  * Right-click on the game while the overlay is click-through (artillery Edit
  * mode draws the grid but leaves the mouse to the game) opens the place menu.
- * On Windows the click is swallowed, so the game never sees it. Elsewhere the
- * global input hook only observes it and the game gets it too: a window can't
- * take just one mouse button.
+ * On Windows and macOS the click is swallowed, so the game never sees it. On
+ * Linux, or if that hook fails, the global input hook only observes it and the
+ * game gets it too: a window can't take just one mouse button.
  *
  * Resolves to false when neither hook can run (macOS without Accessibility),
  * so the renderer can fall back to taking the mouse itself.

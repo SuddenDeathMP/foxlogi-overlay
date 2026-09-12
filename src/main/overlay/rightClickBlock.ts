@@ -1,14 +1,16 @@
 import { screen } from 'electron'
 import type { Worker } from 'node:worker_threads'
 import createWorker from './rightClickBlock.worker?nodeWorker'
-import { ARMED, BOTTOM, FLAG_COUNT, LEFT, RIGHT, STOP, TOP } from './rightClickBlockFlags'
+import { ARMED, BOTTOM, FLAG_COUNT, LEFT, RIGHT, STOP, TOP } from './rightClickBlockShared'
 import { getOverlay, isInteractive, onInteractiveChange } from './window'
 
-/** The overlay's rect in physical px, which is what the hook reports. Without
- *  a window it stays empty, so nothing is taken. */
+/** The overlay's rect in the hook's coordinates: physical px on Windows,
+ *  points (same as window bounds) on macOS. Without a window it stays empty,
+ *  so nothing is taken. */
 function storeRect(flags: Int32Array): void {
   const win = getOverlay()
-  const r = win ? screen.dipToScreenRect(win, win.getBounds()) : { x: 0, y: 0, width: 0, height: 0 }
+  const bounds = win?.getBounds() ?? { x: 0, y: 0, width: 0, height: 0 }
+  const r = win && process.platform === 'win32' ? screen.dipToScreenRect(win, bounds) : bounds
   Atomics.store(flags, LEFT, r.x)
   Atomics.store(flags, TOP, r.y)
   Atomics.store(flags, RIGHT, r.x + r.width)
@@ -17,16 +19,17 @@ function storeRect(flags: Int32Array): void {
 
 /**
  * Swallow right-clicks that would reach the game, so the game doesn't act on
- * the right-click that opens our place menu (Windows only, see
+ * the right-click that opens our place menu (Windows and macOS, see
  * rightClickBlock.worker.ts). Only clicks made while our window is click-through
  * are taken; clicks on our own UI stay with the DOM. `onRightDown` runs for
  * each swallowed click.
  *
- * Resolves to a stop function, or null where it can't run (other platforms, or
- * the hook failed), so the caller can fall back to observing clicks.
+ * Resolves to a stop function, or null where it can't run (Linux, macOS
+ * without Accessibility, or the hook failed), so the caller can fall back to
+ * observing clicks.
  */
 export function blockRightClicks(onRightDown: () => void): Promise<(() => void) | null> {
-  if (process.platform !== 'win32') return Promise.resolve(null)
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return Promise.resolve(null)
 
   const flags = new Int32Array(new SharedArrayBuffer(FLAG_COUNT * Int32Array.BYTES_PER_ELEMENT))
   let worker: Worker

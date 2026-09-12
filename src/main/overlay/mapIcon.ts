@@ -15,7 +15,7 @@ export interface Frame {
 
 /** Search window at REF_HEIGHT, anchored at the screen's top-right corner. The
  *  icon's centre sits ~36 px from the right edge and ~38 px from the top. */
-export const MAP_ICON_REGION = { w: 150, h: 90 }
+export const MAP_ICON_REGION = { w: 60, h: 60 }
 
 /** Template sizes tried, to tolerate the game's UI-scale setting. */
 const SCALES = [0.85, 1, 1.15]

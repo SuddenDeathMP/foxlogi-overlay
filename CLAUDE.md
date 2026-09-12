@@ -73,13 +73,13 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
     - It's active only with the map known open, or, without map tracking, in Edit mode. Left-drags in gameplay mustn't move pins.
     - Presses that start on our own UI (window interactive) are ignored.
   - Right-clicks come from main: while Edit mode is on, `mapClicks.ts` pushes `push:mapRightClick` with the cursor position in window px, and the layer opens the place menu there.
-    - **Windows:** the right-click is swallowed, so the game never sees it (`rightClickBlock.ts`). A `WH_MOUSE_LL` hook, called through `koffi`, runs in its own worker thread (`rightClickBlock.worker.ts`). That thread only pumps messages, so a busy main thread can't lag the mouse. Main shares a few `Int32Array` flags on a `SharedArrayBuffer` with it (`rightClickBlockFlags.ts`):
-      - armed = our window is click-through;
-      - the overlay rect in physical px, so right-clicks on other monitors are left alone;
-      - stop. A 100 ms thread timer wakes `GetMessageW` up to check it, because nothing else can interrupt that call, and Node joins workers on quit.
+    - **Windows and macOS:** the right-click is swallowed, so the game never sees it (`rightClickBlock.ts`). The hook is called through `koffi` and runs in its own worker thread (`rightClickBlock.worker.ts`). That thread only runs the hook's loop, so a busy main thread can't lag the mouse.
+      - Windows (`rightClickHookWin.ts`): a `WH_MOUSE_LL` hook. A 100 ms thread timer wakes `GetMessageW` up to check the stop flag, because nothing else can interrupt that call, and Node joins workers on quit.
+      - macOS (`rightClickHookMac.ts`): an active `CGEventTap` on the session, which drops an event by returning NULL. The game runs there under CrossOver. It needs Accessibility, like `gameInput.ts`. `CFRunLoopRunInMode` returns every 100 ms to check the stop flag. A tap macOS disabled for a slow callback is re-enabled.
+      - Main shares a few `Int32Array` flags on a `SharedArrayBuffer` with the worker (`rightClickBlockShared.ts`): armed (= our window is click-through), stop, and the overlay rect in the hook's coordinates (physical px on Windows, points on macOS), so right-clicks on other monitors are left alone.
       - The press and its release are both swallowed. Nothing else is touched.
-      - `koffi` is loaded on Windows only: its binary comes from a per-platform `@koromix/koffi-*` package, installed only for the build machine's platform and `asarUnpack`ed.
-    - **Elsewhere,** or if the hook fails, the shared global input hook (`gameInput.ts`) only observes. The game receives that right-click too: a window can't take one mouse button only.
+      - `koffi`'s binary comes from a per-platform `@koromix/koffi-*` package, installed only for the build machine's platform and `asarUnpack`ed. So the x64 mac build, packaged on an arm64 runner, has none: there the worker fails and the fallback below applies.
+    - **Linux,** or if the hook fails, the shared global input hook (`gameInput.ts`) only observes. The game receives that right-click too: a window can't take one mouse button only.
     - Right-clicks while our window is interactive (over pins or panels) are left to the DOM.
     - Without the hook (macOS without Accessibility), Edit mode falls back to capturing the mouse, with the tint.
   - In that fallback the wheel still belongs to the game's map. The root carries `data-wheel-through`. On a wheel step there, the hover tracker makes the window click-through at once, so the following steps reach the game. The first step is lost, because the OS can't pass through only the wheel.
@@ -90,7 +90,7 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
   - **Hex height:** sets `zoom = dy / HEX_HEIGHT` from a vertical drag between a region hex's flat top and bottom edges. `HEX_HEIGHT` = 2197 m × 0.866 ≈ 1902.6 m, from fox-fall's `HEX_SIZE`. This works when the map is zoomed out too far for the game to draw its grid. It sets the scale only; the grid alignment stays as it was.
 - **Track the in-game map** (`hideWithMap`, persisted, on by default; a switch in the Settings drawer, saved with Save):
   - While artillery is on, `useMapWatch` has main poll the screen (`src/main/overlay/mapWatch.ts`). Each capture is ~300 ms, followed by a 100 ms pause. Frames are captured at a height of 1080, so Retina and 1× screens look alike.
-  - Main matches the map's search icon (magnifier) in the top-right 150×90 corner with the pure `mapIcon.ts`. It uses normalized cross-correlation against an embedded 19×19 template: map screens score 0.89–1.0, anything else 0.68 or less, and the threshold is 0.8.
+  - Main matches the map's search icon (magnifier) in the top-right 60×60 corner (120×120 physical px at 2160p) with the pure `mapIcon.ts`. It uses normalized cross-correlation against an embedded 19×19 template: map screens score 0.89–1.0, anything else 0.68 or less, and the threshold is 0.8.
   - A single read above the threshold reports the map open. Polling alone reports it closed only after 2 reads below the threshold. Changes arrive as `push:mapOpen`, and App hides the overlay like a collapse while the map is closed. Hiding starts only after the map has been seen open once since artillery was turned on (`mapSeen`), so opening the tab with the map closed keeps the panel visible.
   - **Keys** (`gameInput.ts`, shared with `mapClicks.ts`): the map closes only with M or Esc, so a system-wide `uiohook-napi` hook listens for them without consuming them, which `globalShortcut` would do.
     - On a key, an open map is reported closed at once.
