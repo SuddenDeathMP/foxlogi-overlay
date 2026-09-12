@@ -192,12 +192,7 @@ export default function ArtilleryPanel(): React.ReactElement {
           </Text>
         )}
 
-        <Flex justify="space-between" align="center">
-          <Text type="secondary">Wind — blowing toward</Text>
-          <Button size="small" type="text" onClick={() => setWind({ azimuth: 0, tier: 0 })}>
-            Reset
-          </Button>
-        </Flex>
+        <Text type="secondary">Wind — blowing toward</Text>
         <Flex gap={12} align="center">
           <WindCompass value={wind.azimuth} onChange={(azimuth) => setWind({ azimuth })} />
           <Space orientation="vertical" size={8}>

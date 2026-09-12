@@ -5,6 +5,7 @@ import { createOverlayWindow, getOverlay } from './overlay/window'
 import { registerIpc, applyHotkeys } from './ipc/handlers'
 import { unregisterHotkeys } from './hotkeys'
 import { stopGameInput } from './overlay/gameInput'
+import { setMapClicks } from './overlay/mapClicks'
 import { initUpdater } from './updater'
 
 // Electron defaults to native Wayland in a Wayland session, where always-on-top,
@@ -48,6 +49,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   unregisterHotkeys()
+  void setMapClicks(false)
   stopGameInput()
 })
 

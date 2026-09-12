@@ -5,6 +5,7 @@ import { currentZones, targetDisplay } from './zones'
 
 let overlay: BrowserWindow | null = null
 let interactive = false
+const interactiveListeners = new Set<(interactive: boolean) => void>()
 
 export function getOverlay(): BrowserWindow | null {
   return overlay
@@ -12,6 +13,12 @@ export function getOverlay(): BrowserWindow | null {
 
 export function isInteractive(): boolean {
   return interactive
+}
+
+/** Follow interactivity changes in main. Returns an unsubscribe function. */
+export function onInteractiveChange(listener: (interactive: boolean) => void): () => void {
+  interactiveListeners.add(listener)
+  return () => interactiveListeners.delete(listener)
 }
 
 function applyBounds(win: BrowserWindow, display: Display): void {
@@ -106,6 +113,7 @@ function applyMouseState(): void {
 export function setInteractive(next: boolean): void {
   if (interactive === next) return
   interactive = next
+  interactiveListeners.forEach((l) => l(next))
   if (!overlay) return
   applyMouseState()
   // No focus() here: interactivity is hover-driven, and stealing keyboard focus

@@ -72,8 +72,14 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
     - A drag of 3 px or more ends with a quiet grid re-detect (300 ms), which removes drift from the game's panning.
     - It's active only with the map known open, or, without map tracking, in Edit mode. Left-drags in gameplay mustn't move pins.
     - Presses that start on our own UI (window interactive) are ignored.
-  - Right-clicks come from main: `mapClicks.ts` listens through the shared global input hook (`gameInput.ts`) while Edit mode is on. It pushes `push:mapRightClick` with the cursor position in window px, and the layer opens the place menu there.
-    - The game receives that right-click too. A window can't take one mouse button only, and the hook only observes.
+  - Right-clicks come from main: while Edit mode is on, `mapClicks.ts` pushes `push:mapRightClick` with the cursor position in window px, and the layer opens the place menu there.
+    - **Windows:** the right-click is swallowed, so the game never sees it (`rightClickBlock.ts`). A `WH_MOUSE_LL` hook, called through `koffi`, runs in its own worker thread (`rightClickBlock.worker.ts`). That thread only pumps messages, so a busy main thread can't lag the mouse. Main shares a few `Int32Array` flags on a `SharedArrayBuffer` with it (`rightClickBlockFlags.ts`):
+      - armed = our window is click-through;
+      - the overlay rect in physical px, so right-clicks on other monitors are left alone;
+      - stop. A 100 ms thread timer wakes `GetMessageW` up to check it, because nothing else can interrupt that call, and Node joins workers on quit.
+      - The press and its release are both swallowed. Nothing else is touched.
+      - `koffi` is loaded on Windows only: its binary comes from a per-platform `@koromix/koffi-*` package, installed only for the build machine's platform and `asarUnpack`ed.
+    - **Elsewhere,** or if the hook fails, the shared global input hook (`gameInput.ts`) only observes. The game receives that right-click too: a window can't take one mouse button only.
     - Right-clicks while our window is interactive (over pins or panels) are left to the DOM.
     - Without the hook (macOS without Accessibility), Edit mode falls back to capturing the mouse, with the tint.
   - In that fallback the wheel still belongs to the game's map. The root carries `data-wheel-through`. On a wheel step there, the hover tracker makes the window click-through at once, so the following steps reach the game. The first step is lost, because the OS can't pass through only the wheel.
@@ -115,5 +121,6 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
 - Windows: some GPUs render transparent windows as black; the `disableHardwareAcceleration` setting is applied before `app.whenReady()` as a fallback.
 - Linux: requires X11/XWayland; pure Wayland breaks always-on-top, click-through, global shortcuts and `getCursorScreenPoint`. Since Electron 38 the default is native Wayland, so the .desktop entries pass `--ozone-platform=x11` (electron-builder `executableArgs`) and `src/main/index.ts` relaunches a packaged app with that flag when it starts in a Wayland session without it. `app.commandLine.appendSwitch` can't do this: Ozone is chosen before main JS runs.
 - macOS: Electron 44 requires macOS 13+. `desktopCapturer` needs `NSAudioCaptureUsageDescription` in Info.plist (set via `mac.extendInfo`), even though we capture screens only.
+- `electron-builder.yml` sets `npmRebuild: false`. The native modules (`uiohook-napi`, `koffi`) ship N-API prebuilds, which work with any Electron version, while `@electron/rebuild`'s `node-abi` lags new Electron majors and fails the package step.
 - Electron 42+ no longer downloads its binary on install; the `postinstall` script runs `install-electron` so electron-vite finds `node_modules/electron/path.txt`.
 - `NativeImage.toBitmap()` returns sRGB-normalized pixels (Electron 43+). The grid and map-icon thresholds apply to those values.
