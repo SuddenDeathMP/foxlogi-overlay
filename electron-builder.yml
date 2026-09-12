@@ -10,6 +10,11 @@ asar: true
 # Native global key listener (map watch): its prebuilt .node must load from real files.
 asarUnpack:
   - node_modules/uiohook-napi/**
+# Its only native dependency (uiohook-napi) ships N-API prebuilds for every
+# platform/arch, which are ABI-stable across Electron versions, so skip
+# @electron/rebuild — its node-abi lags new Electron majors and fails the build.
+# Re-enable if a non-N-API native module is ever added.
+npmRebuild: false
 
 # Publish auto-updates via GitHub Releases (electron-updater).
 publish:
