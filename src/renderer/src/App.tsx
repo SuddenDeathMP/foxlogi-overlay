@@ -1,19 +1,38 @@
-import { useEffect, useState } from 'react'
-import { App as AntdApp, Button, Tooltip } from 'antd'
-import { ExpandAltOutlined } from '@ant-design/icons'
-import { C } from './theme/graphite'
+import { useEffect, useRef, useState } from 'react'
+import { App as AntdApp, Button, ConfigProvider, Tooltip } from 'antd'
+import { ExpandAltOutlined, ShrinkOutlined } from '@ant-design/icons'
+import { C, graphiteTheme } from './theme/graphite'
 import { useApp } from './stores/appStore'
 import { call } from './lib/api'
 import type { LogiItem, ParsedStockpile } from '@shared/types'
 import type { ResolvedZones } from '@shared/zones'
 import Zone from './components/Zone'
-import TopBanner from './features/Auth/TopBanner'
+import TopBanner, { ARTILLERY_TAB } from './features/Auth/TopBanner'
 import AuthPanel from './features/Auth/AuthPanel'
 import SettingsPanel from './features/Settings/SettingsPanel'
 import LogisticsPanel from './features/Logistics/LogisticsPanel'
 import BunkerSupplyPanel from './features/BunkerSupply/BunkerSupplyPanel'
 import PilotMissionPanel from './features/PilotMission/PilotMissionPanel'
 import IngestSheet from './features/Logistics/IngestSheet'
+import ArtilleryLayer from './features/Artillery/ArtilleryLayer'
+import ArtilleryPanel from './features/Artillery/ArtilleryPanel'
+import ArtilleryReadout from './features/Artillery/ArtilleryReadout'
+import { useArtillery } from './features/Artillery/store'
+import { requestAutoDetect, runAutoDetect } from './features/Artillery/autoDetect'
+import { useMapWatch } from './features/Artillery/useMapWatch'
+import { useMapDrag } from './features/Artillery/useMapDrag'
+import { ARTY_THEME } from './features/Artillery/ui'
+
+/** Gap between the artillery HUD and the screen's left edge, px. */
+const ARTY_EDGE_GAP = 25
+/** Overlay toggle: the theme's small button size, inset like the banner's right
+ *  edge (1px surface border + 12px padding). */
+const TOGGLE_SIZE = graphiteTheme.token.controlHeightSM
+const TOGGLE_INSET = 13
+/** After a wheel step over the artillery map, cursor moves within this radius
+ *  (px) and time (ms) don't re-grab the mouse from the game. */
+const WHEEL_HOLD_PX = 8
+const WHEEL_HOLD_MS = 1500
 
 export default function App(): React.ReactElement {
   const { message } = AntdApp.useApp()
@@ -25,15 +44,48 @@ export default function App(): React.ReactElement {
   const setZones = useApp((s) => s.setZones)
   const setItems = useApp((s) => s.setItems)
   const setUpdateVersion = useApp((s) => s.setUpdateVersion)
+  const artyMode = useArtillery((s) => s.mode)
+  const setArtyMode = useArtillery((s) => s.setMode)
+  const hideWithMap = useArtillery((s) => s.hideWithMap)
+  const mapOpen = useArtillery((s) => s.mapOpen)
+  const calibrating = useArtillery((s) => s.calibrating)
 
   const [showSettings, setShowSettings] = useState(false)
   const [ingest, setIngest] = useState<ParsedStockpile | null>(null)
   const [activeTab, setActiveTab] = useState('logi')
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('overlay-collapsed') === '1')
+  // Expanded by hand while auto-hidden: stays shown until the map next opens/closes.
+  const [forceShow, setForceShow] = useState(false)
 
   useEffect(() => {
     localStorage.setItem('overlay-collapsed', collapsed ? '1' : '0')
   }, [collapsed])
+
+  const artyOn = artyMode !== 'off'
+  // Artillery: follow the in-game map — hidden while it's closed.
+  useMapWatch(artyOn && hideWithMap && !collapsed && !showSettings && !calibrating, message)
+  useEffect(() => setForceShow(false), [mapOpen])
+  // Map just opened (or was open when watching started): re-sync to its grid.
+  useEffect(() => {
+    if (mapOpen) requestAutoDetect(message, 150)
+  }, [mapOpen, message])
+  const autoHidden = artyOn && mapOpen === false && !forceShow
+  const hidden = collapsed || autoHidden
+  // Pan the grid and pins along when the in-game map is dragged. Only with the
+  // map known to be open — or, without map tracking, in Edit mode — so that
+  // left-drags in gameplay (aiming, shooting) never move them.
+  useMapDrag(
+    artyOn && !hidden && !calibrating && (mapOpen === true || (mapOpen === null && artyMode === 'edit')),
+    message
+  )
+
+  // Toggle button and hotkey: while auto-hidden, "expand" overrides the map watch.
+  const toggleUi = (): void => {
+    if (autoHidden && !collapsed) setForceShow(true)
+    else setCollapsed((c) => !c)
+  }
+  const toggleUiRef = useRef(toggleUi)
+  toggleUiRef.current = toggleUi
 
   // Hover-driven interactivity: the window is click-through, but forwarded
   // mousemove still hit-tests the DOM. Over a UI element (anything but the
@@ -42,6 +94,9 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     let hideTimer: ReturnType<typeof setTimeout> | undefined
     let active = false
+    // Set by a wheel step over the artillery map: the window stays click-through
+    // (so the game gets the wheel) until the cursor really moves away from here.
+    let wheelHold: { x: number; y: number; t: number } | null = null
 
     const release = (): void => {
       if (active || hideTimer) {
@@ -55,6 +110,12 @@ export default function App(): React.ReactElement {
     }
 
     const onMove = (e: MouseEvent): void => {
+      if (wheelHold) {
+        // Hand jitter while scrolling mustn't grab the mouse back mid-zoom.
+        const still = Math.hypot(e.clientX - wheelHold.x, e.clientY - wheelHold.y) < WHEEL_HOLD_PX
+        if (still && Date.now() - wheelHold.t < WHEEL_HOLD_MS) return
+        wheelHold = null
+      }
       const overUi =
         e.target instanceof Element &&
         e.target !== document.documentElement &&
@@ -78,11 +139,27 @@ export default function App(): React.ReactElement {
       if (!e.relatedTarget) release()
     }
 
+    // A wheel step over the artillery map (Edit mode takes the mouse): hand the
+    // mouse back to the game at once so the following steps zoom its map. This
+    // first step is ours and is lost; the OS can't pass through only the wheel.
+    const onWheel = (e: WheelEvent): void => {
+      if (!(e.target instanceof Element) || !e.target.closest('[data-wheel-through]')) return
+      if (hideTimer) {
+        clearTimeout(hideTimer)
+        hideTimer = undefined
+      }
+      wheelHold = { x: e.clientX, y: e.clientY, t: Date.now() }
+      active = false
+      window.api.overlay.setInteractive(false)
+    }
+
     document.addEventListener('mousemove', onMove, true)
     document.addEventListener('mouseout', onLeave, true)
+    document.addEventListener('wheel', onWheel, { capture: true, passive: true })
     return () => {
       document.removeEventListener('mousemove', onMove, true)
       document.removeEventListener('mouseout', onLeave, true)
+      document.removeEventListener('wheel', onWheel, true)
       if (hideTimer) clearTimeout(hideTimer)
     }
   }, [])
@@ -111,7 +188,10 @@ export default function App(): React.ReactElement {
         if (res.ok && res.stockpile) setIngest(res.stockpile)
         else message.warning(res.error || 'No stockpile data found on clipboard.')
       }),
-      window.api.overlay.onToggleUi(() => setCollapsed((c) => !c)),
+      window.api.overlay.onToggleUi(() => toggleUiRef.current()),
+      window.api.overlay.onDetectGrid(() => runAutoDetect(message)),
+      // The open map was wheel-zoomed and has settled (600 ms): re-sync.
+      window.api.overlay.onMapZoomed(() => requestAutoDetect(message, 0)),
       window.api.overlay.onHotkeyWarning((w) =>
         message.warning(`Hotkey not registered (already in use?): ${w.failed.join(', ')}`, 8)
       )
@@ -129,38 +209,81 @@ export default function App(): React.ReactElement {
   }, [auth?.authenticated, setItems])
 
   const z = zones?.zones
-  // Where collapsing zones fly to: the centre of the mini-launcher button.
-  const launcherPos = { x: (z?.top?.x ?? 12) + 4, y: (z?.top?.y ?? 0) + 6 }
-  const collapseTo = { x: launcherPos.x + 20, y: launcherPos.y + 20 }
+  // One collapse/expand toggle, pinned at the top banner's left edge in both
+  // states so it can be clicked at the same spot; zones fly into its centre.
+  const togglePos = { x: (z?.top?.x ?? 0) + TOGGLE_INSET, y: (z?.top?.y ?? 0) + ((z?.top?.h ?? 40) - TOGGLE_SIZE) / 2 }
+  const collapseTo = { x: togglePos.x + TOGGLE_SIZE / 2, y: togglePos.y + TOGGLE_SIZE / 2 }
 
   return (
     <>
-      <Zone rect={z?.top} hidden={collapsed} collapseTo={collapseTo}>
+      {/* Full-screen map layer; rendered first so the zones paint above it. */}
+      <ConfigProvider theme={ARTY_THEME}>
+        <ArtilleryLayer hidden={hidden} />
+      </ConfigProvider>
+
+      {/* Grows with its buttons/tags so nothing in the bar gets clipped. */}
+      <Zone rect={z?.top} hidden={hidden} collapseTo={collapseTo} growToContent>
         <TopBanner
           onOpenSettings={() => setShowSettings(true)}
-          tab={activeTab}
-          onTabChange={setActiveTab}
-          onCollapse={() => setCollapsed(true)}
+          tab={artyOn ? ARTILLERY_TAB : activeTab}
+          onTabChange={(tab) => {
+            if (tab === ARTILLERY_TAB) {
+              if (!artyOn) {
+                setArtyMode('edit')
+                requestAutoDetect(message, 400)
+              }
+              return
+            }
+            setActiveTab(tab)
+            setArtyMode('off')
+          }}
+          toggleSpace={TOGGLE_INSET + TOGGLE_SIZE}
         />
       </Zone>
 
-      {/* Collapsed mode: everything folds into this one small launcher. */}
-      <div
-        className={`mini-launcher${collapsed ? '' : ' zone-hidden'}`}
-        style={{ left: launcherPos.x, top: launcherPos.y }}
+      {/* Kept off the screen edge so the game's grid stays visible there (auto-detect reads the edges). */}
+      <Zone
+        rect={z?.left && { ...z.left, x: z.left.x + ARTY_EDGE_GAP }}
+        hidden={hidden || !artyOn}
+        collapseTo={collapseTo}
+        className="arty-zone"
       >
-        <Tooltip title="Expand overlay" placement="right">
-          <Button
-            shape="circle"
-            // type="primary"
-            size="large"
-            icon={<ExpandAltOutlined style={{ color: C.accent }}/>}
-            onClick={() => setCollapsed(false)}
-          />
-        </Tooltip>
+        <ConfigProvider theme={ARTY_THEME}>
+          <ArtilleryPanel />
+        </ConfigProvider>
+      </Zone>
+
+      {/* Collapse/expand toggle: outside the zones so it stays put in both states. */}
+      {z?.top && (
+        <div className="overlay-toggle" style={{ left: togglePos.x, top: togglePos.y }}>
+          <Tooltip title={hidden ? 'Expand overlay' : 'Collapse overlay'} placement="bottom">
+            <Button
+              size="small"
+              icon={hidden ? <ExpandAltOutlined style={{ color: C.accent }} /> : <ShrinkOutlined />}
+              onClick={toggleUi}
+              aria-label={hidden ? 'Expand overlay' : 'Collapse overlay'}
+            />
+          </Tooltip>
+        </div>
+      )}
+
+      {/* Collapsed: the active firing solution stays readable next to the toggle. */}
+      <div
+        className={`mini-launcher${hidden ? '' : ' zone-hidden'}`}
+        style={{
+          left: togglePos.x + TOGGLE_SIZE + 6,
+          top: togglePos.y,
+          height: TOGGLE_SIZE,
+          display: 'flex',
+          alignItems: 'center',
+          pointerEvents: 'none'
+        }}
+      >
+        <ArtilleryReadout />
       </div>
 
-      <Zone rect={z?.bottom} hidden={collapsed} collapseTo={collapseTo}>
+      {/* Artillery mode clears the bottom strip so the whole map is usable. */}
+      <Zone rect={z?.bottom} hidden={hidden || artyOn} collapseTo={collapseTo}>
         {!auth?.authenticated ? (
           <AuthPanel />
         ) : (

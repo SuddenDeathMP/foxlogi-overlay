@@ -4,6 +4,7 @@ import { loadKey } from './auth/store'
 import { createOverlayWindow, getOverlay } from './overlay/window'
 import { registerIpc, applyHotkeys } from './ipc/handlers'
 import { unregisterHotkeys } from './hotkeys'
+import { stopGameInput } from './overlay/gameInput'
 import { initUpdater } from './updater'
 
 // Some Windows GPU configs render transparent windows as opaque black; allow a
@@ -28,6 +29,7 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   unregisterHotkeys()
+  stopGameInput()
 })
 
 // Keep running with no visible windows is fine for an overlay; on macOS the

@@ -14,6 +14,7 @@ const DEFAULTS: AppSettings = {
   // rarely contested.
   toggleHotkey: 'Alt+X',
   ingestHotkey: 'Alt+Shift+S',
+  gridDetectHotkey: 'Alt+G',
   disableHardwareAcceleration: false
 }
 
@@ -30,6 +31,7 @@ export function getSettings(): AppSettings {
     const p = configPath()
     if (existsSync(p)) {
       const raw = JSON.parse(readFileSync(p, 'utf-8'))
+      delete raw.artilleryHotkey // retired: artillery is a top-bar tab now
       next = { ...DEFAULTS, ...raw }
     }
   } catch {

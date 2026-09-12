@@ -20,12 +20,41 @@ export interface AppSettings {
   toggleHotkey: string
   /** optional global hotkey for clipboard stockpile ingest */
   ingestHotkey: string
+  /** global hotkey running artillery grid auto-detect */
+  gridDetectHotkey: string
   disableHardwareAcceleration: boolean
 }
 
 export interface OverlayState {
   interactive: boolean
 }
+
+export type GridEdge = 'top' | 'bottom' | 'left' | 'right'
+
+/** Map grid auto-detection from the screen edges. Positions are logical px. */
+export type GridDetectResult =
+  | {
+      ok: true
+      /** One grid cell (line spacing + one line thickness). */
+      cellPx: number
+      /** Screen x of one vertical grid line, if found on the top/bottom edge. */
+      xLine?: number
+      /** Screen y of one horizontal grid line, if found on the left/right edge. */
+      yLine?: number
+      edges: GridEdge[]
+    }
+  | { ok: false; reason: 'permission' | 'capture' | 'not-found'; error: string; edges: GridEdge[] }
+
+/** Map watching started: `region` is the probed screen corner in window px,
+ *  which the overlay must not draw into (it would end up in the capture).
+ *  `keys`: the global M/Esc hook runs (false → polling only, e.g. no macOS
+ *  Accessibility permission). */
+export type MapWatchStart =
+  | { ok: true; keys: boolean; region: { x: number; y: number; w: number; h: number } }
+  | { ok: false; error: string }
+
+/** Pushed when the in-game map opens/closes; `open: null` means watching stopped. */
+export type MapOpenState = { open: boolean } | { open: null; error: string }
 
 export interface ParsedStockpile {
   hex?: string

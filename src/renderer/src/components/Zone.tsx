@@ -9,6 +9,9 @@ interface Props {
   hidden?: boolean
   /** Screen point the zone should collapse toward (the mini-launcher). */
   collapseTo?: { x: number; y: number }
+  className?: string
+  /** Widen past rect.w when the content needs more room (rect.w stays the minimum). */
+  growToContent?: boolean
 }
 
 /** Absolutely-positioned overlay region. The window is click-through globally;
@@ -18,7 +21,9 @@ export function Zone({
   children,
   surface = true,
   hidden = false,
-  collapseTo
+  collapseTo,
+  className,
+  growToContent = false
 }: Props): React.ReactElement | null {
   if (!rect) return null
   // Offset from this zone's top-left to the collapse target; consumed by the
@@ -31,8 +36,14 @@ export function Zone({
     : undefined
   return (
     <div
-      className={`overlay-zone${hidden ? ' zone-hidden' : ''}`}
-      style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h, ...vars }}
+      className={`overlay-zone${hidden ? ' zone-hidden' : ''}${className ? ` ${className}` : ''}`}
+      style={{
+        left: rect.x,
+        top: rect.y,
+        ...(growToContent ? { width: 'max-content', minWidth: rect.w } : { width: rect.w }),
+        height: rect.h,
+        ...vars
+      }}
     >
       {surface ? <div className="zone-surface">{children}</div> : children}
     </div>

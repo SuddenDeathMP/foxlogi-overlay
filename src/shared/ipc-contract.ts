@@ -14,6 +14,14 @@ export const IPC = {
   overlaySetInteractive: 'overlay:setInteractive',
   overlayGetState: 'overlay:getState',
   overlayQuit: 'overlay:quit',
+  // artillery: find the map grid in the screen edges (main captures the screen)
+  overlayDetectGrid: 'overlay:detectGrid',
+  // artillery: start/stop watching the screen for the open in-game map
+  overlaySetMapWatch: 'overlay:setMapWatch',
+  // artillery Edit mode: report right-clicks made through the click-through overlay
+  overlaySetMapClicks: 'overlay:setMapClicks',
+  // artillery: report left-drags on the game so the grid pans with the map
+  overlaySetMapDrag: 'overlay:setMapDrag',
   // generic, narrow API gateway (operation is an enumerated key, never a raw URL)
   apiCall: 'api:call',
   // clipboard stockpile ingest
@@ -28,6 +36,16 @@ export const IPC = {
   pushIngest: 'push:ingest',
   // toggle-UI hotkey pressed (main -> renderer)
   pushToggleUi: 'push:toggleUi',
+  // in-game map opened/closed, or map watching failed (main -> renderer)
+  pushMapOpen: 'push:mapOpen',
+  // the open map was zoomed with the wheel and has settled (main -> renderer)
+  pushMapZoomed: 'push:mapZoomed',
+  // right-click on the game, in window px, while map clicks are on (main -> renderer)
+  pushMapRightClick: 'push:mapRightClick',
+  // a left-drag step on the game, logical px; `end` on release (main -> renderer)
+  pushMapDrag: 'push:mapDrag',
+  // grid auto-detect hotkey pressed (main -> renderer)
+  pushDetectGrid: 'push:detectGrid',
   // hotkey registration failures (main -> renderer)
   pushHotkeyWarning: 'push:hotkeyWarning'
 } as const

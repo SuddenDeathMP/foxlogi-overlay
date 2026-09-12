@@ -7,6 +7,10 @@ import { authEvents } from '../api/client'
 import { dispatch } from '../api/endpoints'
 import { ingestFromClipboard } from '../clipboard/ingest'
 import { listDisplays } from '../overlay/zones'
+import { detectGridOnScreen } from '../overlay/gridCapture'
+import { startMapWatch, stopMapWatch } from '../overlay/mapWatch'
+import { setMapClicks } from '../overlay/mapClicks'
+import { setMapDrag } from '../overlay/mapDrag'
 import { setInteractive, isInteractive, moveToTargetDisplay, getOverlay } from '../overlay/window'
 import { registerHotkeys } from '../hotkeys'
 
@@ -65,7 +69,11 @@ export function registerIpc(): void {
     const prev = getSettings()
     const next = updateSettings(patch)
     if (patch.displayId !== undefined && patch.displayId !== prev.displayId) moveToTargetDisplay()
-    if (next.toggleHotkey !== prev.toggleHotkey || next.ingestHotkey !== prev.ingestHotkey) {
+    if (
+      next.toggleHotkey !== prev.toggleHotkey ||
+      next.ingestHotkey !== prev.ingestHotkey ||
+      next.gridDetectHotkey !== prev.gridDetectHotkey
+    ) {
       applyHotkeys()
     }
     broadcast(IPC.authStatus, buildStatus())
@@ -81,6 +89,14 @@ export function registerIpc(): void {
   ipcMain.handle(IPC.overlayGetState, async () => ({ interactive: isInteractive() }))
   ipcMain.handle(IPC.overlayQuit, async () => {
     app.quit()
+  })
+  ipcMain.handle(IPC.overlayDetectGrid, async () => detectGridOnScreen())
+  ipcMain.handle(IPC.overlaySetMapClicks, async (_e, on: boolean) => setMapClicks(!!on))
+  ipcMain.handle(IPC.overlaySetMapDrag, async (_e, on: boolean) => setMapDrag(!!on))
+  ipcMain.handle(IPC.overlaySetMapWatch, async (_e, on: boolean) => {
+    if (on) return startMapWatch()
+    stopMapWatch()
+    return null
   })
 
   // ---- narrow API gateway ----
@@ -111,13 +127,19 @@ export function runHotkeyToggle(): void {
   getOverlay()?.webContents.send(IPC.pushToggleUi)
 }
 
+/** Grid auto-detect hotkey: the renderer hides the overlay, then asks main to capture. */
+export function runHotkeyGridDetect(): void {
+  getOverlay()?.webContents.send(IPC.pushDetectGrid)
+}
+
 /** (Re-)register global hotkeys and surface failures in the overlay UI. */
 export function applyHotkeys(): void {
-  const result = registerHotkeys(runHotkeyIngest, runHotkeyToggle)
-  const { toggleHotkey, ingestHotkey } = getSettings()
+  const result = registerHotkeys(runHotkeyIngest, runHotkeyToggle, runHotkeyGridDetect)
+  const { toggleHotkey, ingestHotkey, gridDetectHotkey } = getSettings()
   const failed: string[] = []
   if (toggleHotkey && !result.toggle) failed.push(`toggle UI (${toggleHotkey})`)
   if (ingestHotkey && !result.ingest) failed.push(`stockpile ingest (${ingestHotkey})`)
+  if (gridDetectHotkey && !result.gridDetect) failed.push(`grid auto-detect (${gridDetectHotkey})`)
   if (failed.length === 0) return
   console.warn('Hotkey registration failed:', failed.join(', '))
   const wc = getOverlay()?.webContents
