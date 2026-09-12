@@ -95,8 +95,13 @@ export function parseStockpileText(text: string): ParseResult {
 }
 
 /** Read and parse whatever stockpile text is currently on the clipboard. */
-export function ingestFromClipboard(): ParseResult {
-  const text = clipboard.readText()
+export async function ingestFromClipboard(): Promise<ParseResult> {
+  let text: string
+  try {
+    text = await clipboard.readText()
+  } catch {
+    return { ok: false, error: 'Could not read the clipboard.' }
+  }
   if (!text || !text.trim()) {
     return { ok: false, error: 'Clipboard is empty.' }
   }

@@ -84,7 +84,9 @@ Unsigned dev builds skip the update check.
 
 - **Windows**: if the overlay renders as a black box, enable *Disable hardware
   acceleration* in Settings (some GPUs mishandle transparent windows).
-- **Linux**: use an **X11 (XWayland)** session — pure Wayland restricts
-  always-on-top, click-through, and global shortcuts. Without a keyring the API key
-  is kept in memory only (a banner warns you).
-- **macOS**: global hotkeys may require granting **Accessibility** permission.
+- **Linux**: the overlay runs under **X11 (XWayland)** — pure Wayland restricts
+  always-on-top, click-through, and global shortcuts. In a Wayland session it
+  switches itself to XWayland (`--ozone-platform=x11`), so XWayland must be
+  available. Without a keyring the API key is kept in memory only (a banner warns you).
+- **macOS**: requires macOS 13 or later. Global hotkeys may require granting
+  **Accessibility** permission.

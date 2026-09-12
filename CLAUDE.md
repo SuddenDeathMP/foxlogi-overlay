@@ -51,7 +51,7 @@ Layout uses three "safe zones" (top banner / left / bottom strip) defined as dis
 
 - **Settings** (`src/main/settings.ts`): persisted to `userData/config.json`. The backend host is **fixed per build** (`https://foxlogi.com` packaged, `http://localhost:5173` dev) and force-overrides anything persisted — not user-configurable.
 - **Global hotkeys** (`src/main/hotkeys.ts`): toggle UI collapse (default `Alt+X`), clipboard ingest (default `Alt+Shift+S`) and artillery grid auto-detect (default `Alt+G`). Registration can fail if the game owns the combo; failures are pushed to the renderer as a warning, never silently ignored.
-- **Clipboard ingest** (`src/main/clipboard/ingest.ts`): parses the game's stockpile clipboard export (TSV, tolerates CSV), detects the source type by row count, and pushes the parsed result to the renderer's `IngestSheet`.
+- **Clipboard ingest** (`src/main/clipboard/ingest.ts`): reads the clipboard asynchronously (`clipboard.readText()` returns a Promise since Electron 44), parses the game's stockpile clipboard export (TSV, tolerates CSV), detects the source type by row count, and pushes the parsed result to the renderer's `IngestSheet`.
 - **Auto-update** (`src/main/updater.ts`): electron-updater against the `publish` target in `electron-builder.yml`.
 
 ### Renderer
@@ -85,7 +85,7 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
 - **Track the in-game map** (`hideWithMap`, persisted, on by default; a switch in the Settings drawer, saved with Save):
   - While artillery is on, `useMapWatch` has main poll the screen (`src/main/overlay/mapWatch.ts`). Each capture is ~300 ms, followed by a 100 ms pause. Frames are captured at a height of 1080, so Retina and 1× screens look alike.
   - Main matches the map's search icon (magnifier) in the top-right 150×90 corner with the pure `mapIcon.ts`. It uses normalized cross-correlation against an embedded 19×19 template: map screens score 0.89–1.0, anything else 0.68 or less, and the threshold is 0.8.
-  - A single read above the threshold reports the map open. Polling alone reports it closed only after 2 reads below the threshold. Changes arrive as `push:mapOpen`, and App hides the overlay like a collapse while the map is closed.
+  - A single read above the threshold reports the map open. Polling alone reports it closed only after 2 reads below the threshold. Changes arrive as `push:mapOpen`, and App hides the overlay like a collapse while the map is closed. Hiding starts only after the map has been seen open once since artillery was turned on (`mapSeen`), so opening the tab with the map closed keeps the panel visible.
   - **Keys** (`gameInput.ts`, shared with `mapClicks.ts`): the map closes only with M or Esc, so a system-wide `uiohook-napi` hook listens for them without consuming them, which `globalShortcut` would do.
     - On a key, an open map is reported closed at once.
     - A fresh capture starts 120 ms later. Reads from captures started before then are ignored, and that fresh capture also catches M opening the map.
@@ -113,4 +113,7 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
 
 - The game must run in **borderless windowed** mode — exclusive fullscreen bypasses the compositor and the overlay won't draw.
 - Windows: some GPUs render transparent windows as black; the `disableHardwareAcceleration` setting is applied before `app.whenReady()` as a fallback.
-- Linux: requires X11/XWayland; pure Wayland breaks always-on-top, click-through, and global shortcuts.
+- Linux: requires X11/XWayland; pure Wayland breaks always-on-top, click-through, global shortcuts and `getCursorScreenPoint`. Since Electron 38 the default is native Wayland, so the .desktop entries pass `--ozone-platform=x11` (electron-builder `executableArgs`) and `src/main/index.ts` relaunches a packaged app with that flag when it starts in a Wayland session without it. `app.commandLine.appendSwitch` can't do this: Ozone is chosen before main JS runs.
+- macOS: Electron 44 requires macOS 13+. `desktopCapturer` needs `NSAudioCaptureUsageDescription` in Info.plist (set via `mac.extendInfo`), even though we capture screens only.
+- Electron 42+ no longer downloads its binary on install; the `postinstall` script runs `install-electron` so electron-vite finds `node_modules/electron/path.txt`.
+- `NativeImage.toBitmap()` returns sRGB-normalized pixels (Electron 43+). The grid and map-icon thresholds apply to those values.

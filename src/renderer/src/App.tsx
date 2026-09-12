@@ -69,7 +69,14 @@ export default function App(): React.ReactElement {
   useEffect(() => {
     if (mapOpen) requestAutoDetect(message, 150)
   }, [mapOpen, message])
-  const autoHidden = artyOn && mapOpen === false && !forceShow
+  // Auto-hide starts only once the map has been open since artillery was turned
+  // on — opening the Artillery tab with the map closed keeps the panel in view.
+  const [mapSeen, setMapSeen] = useState(false)
+  useEffect(() => {
+    if (!artyOn) setMapSeen(false)
+    else if (mapOpen) setMapSeen(true)
+  }, [artyOn, mapOpen])
+  const autoHidden = artyOn && mapSeen && mapOpen === false && !forceShow
   const hidden = collapsed || autoHidden
   // Pan the grid and pins along when the in-game map is dragged. Only with the
   // map known to be open — or, without map tracking, in Edit mode — so that

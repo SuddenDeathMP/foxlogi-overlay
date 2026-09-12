@@ -7,14 +7,33 @@ import { unregisterHotkeys } from './hotkeys'
 import { stopGameInput } from './overlay/gameInput'
 import { initUpdater } from './updater'
 
+// Electron defaults to native Wayland in a Wayland session, where always-on-top,
+// click-through, global shortcuts and global cursor positions don't work. Run
+// under XWayland instead. The Ozone platform is picked before this script runs,
+// so appendSwitch is too late: relaunch with the flag. The .desktop entries
+// already pass it (electron-builder `executableArgs`); this covers direct runs.
+const relaunchForX11 =
+  process.platform === 'linux' &&
+  app.isPackaged &&
+  process.env['XDG_SESSION_TYPE'] === 'wayland' &&
+  !app.commandLine.hasSwitch('ozone-platform')
+if (relaunchForX11) {
+  app.relaunch({
+    execPath: process.env['APPIMAGE'] || process.execPath,
+    args: [...process.argv.slice(1), '--ozone-platform=x11']
+  })
+  app.exit(0)
+}
+
 // Some Windows GPU configs render transparent windows as opaque black; allow a
 // settings-driven fallback before the app is ready.
 if (getSettings().disableHardwareAcceleration) {
   app.disableHardwareAcceleration()
 }
 
-// Single instance — a second launch just focuses the existing overlay.
-const gotLock = app.requestSingleInstanceLock()
+// Single instance — a second launch just focuses the existing overlay. A process
+// that is relaunching must not take the lock from its successor.
+const gotLock = !relaunchForX11 && app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 }

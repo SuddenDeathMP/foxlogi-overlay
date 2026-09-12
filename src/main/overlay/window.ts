@@ -33,6 +33,9 @@ export function createOverlayWindow(): BrowserWindow {
     height: display.bounds.height,
     frame: false,
     transparent: true,
+    // Frameless windows get rounded corners by default (Linux too since
+    // Electron 43), which would clip the overlay's corners.
+    roundedCorners: false,
     resizable: false,
     movable: false,
     minimizable: false,

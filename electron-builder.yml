@@ -40,6 +40,10 @@ mac:
   # Auto-update on macOS REQUIRES signing + notarization.
   hardenedRuntime: true
   gatekeeperAssess: false
+  # Electron 39+ requires this key for any desktopCapturer use on macOS 14.2+,
+  # even screen-only capture (grid detect, map watch). We never capture audio.
+  extendInfo:
+    NSAudioCaptureUsageDescription: Foxlogi Overlay does not capture audio.
 
 linux:
   category: Utility
@@ -47,3 +51,8 @@ linux:
     - AppImage
     - deb
   maintainer: FoxholeLogistics
+  # Run under XWayland: native Wayland (Electron 38+ default) breaks always-on-top,
+  # click-through and global shortcuts. src/main/index.ts relaunches with the
+  # same flag when the app is started without it.
+  executableArgs:
+    - --ozone-platform=x11

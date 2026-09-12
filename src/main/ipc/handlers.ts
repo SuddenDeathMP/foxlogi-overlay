@@ -116,8 +116,8 @@ export function registerIpc(): void {
 }
 
 /** Hotkey-driven ingest: force interactive mode and push the parsed result. */
-export function runHotkeyIngest(): void {
-  const result = ingestFromClipboard()
+export async function runHotkeyIngest(): Promise<void> {
+  const result = await ingestFromClipboard()
   setInteractive(true)
   getOverlay()?.webContents.send(IPC.pushIngest, result)
 }
