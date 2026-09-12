@@ -45,7 +45,7 @@ All channel names live in the `IPC` const in `src/shared/ipc-contract.ts` — bo
 
 One frameless transparent window covers the target display at `screen-saver` always-on-top level (`src/main/overlay/window.ts`). It is **click-through by default** (`setIgnoreMouseEvents(true, {forward: true})`); forwarded mousemove still hit-tests the DOM, and `App.tsx` flips interactivity on hover: cursor over any UI element → `setInteractive(true)`; off UI → back to click-through after a 150ms grace period. Anything that calls `setBounds` may reset the OS pass-through state, so geometry changes must re-assert it (`applyMouseState`).
 
-Layout uses three "safe zones" (top banner / left / bottom strip) defined as display-size fractions in `src/shared/zones.ts`, resolved to logical pixels in main and pushed to the renderer via `push:zones`. The `Zone` component positions its children absolutely from those rects; the screen center stays clear for the game's own UI.
+Layout uses three "safe zones" (top banner / left / bottom strip) defined as display-size fractions in `src/shared/zones.ts`, resolved to logical pixels in main and pushed to the renderer via `push:zones`. The `Zone` component positions its children absolutely from those rects; the screen center stays clear for the game's own UI. The top banner is the exception on height: `App.tsx` places it 10 px below the screen edge and sizes it to its controls, with the same 13 px inset above and below as at the sides (`topRect`).
 
 ### Other main-process pieces
 
@@ -109,7 +109,6 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
     - when the map opens (150 ms);
     - when the Artillery tab is selected (400 ms);
     - after the open map is wheel-zoomed. The same hook reports wheel steps, and main pushes `push:mapZoomed` once the wheel has been quiet for 400 ms. Wheel steps while our window is interactive are ours, so they're ignored.
-    - A run that doesn't find the grid is retried twice, 500 ms apart (the first try can land in the game's open or zoom animation). A newer request cancels the retries.
   - The toggle button or Alt+X shows the overlay anyway, until the map next opens or closes.
   - The watched corner comes back as `mapProbe`, and `ArtilleryLayer` clips it out, because our own drawings would otherwise be in the capture.
   - Watching pauses while collapsed, calibrating, or with Settings open.
@@ -119,7 +118,8 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
     - Why the strips span the screen: the game draws the grid only inside the current region hex, so the screen edges often show no lines at all (outside the region, or across the label band).
     - **Windows:** only the strips are read, with GDI through the shared `screenGrab.ts` worker (milliseconds). It falls back to `desktopCapturer` if the worker fails or every strip comes back black.
     - **Elsewhere:** `desktopCapturer` captures the whole display at full resolution and the strips are cropped from it.
-    - During the capture main keeps our window out of the frame with `setContentProtection(true)`, so there's no blink. On Windows that covers GDI reads too. Linux has no such flag, so there the renderer fades the overlay (`html.capture-hidden`).
+    - Our drawn grid would break detection wherever it gets into the frame, because its lines look like the game's. So while `detecting` is set, `ArtilleryLayer` doesn't draw it, and the renderer waits for that frame to paint (two animation frames, capped at 100 ms) before asking main to capture. The grid comes back with the new viewport.
+    - Main also keeps our window out of the frame with `setContentProtection(true)`, so the rest of the overlay doesn't blink. On macOS the dev dump confirms it. For GDI on Windows it's unverified, which is why the grid isn't left to it. Linux has no such flag, so there the renderer fades the whole overlay (`html.capture-hidden`).
     - In dev builds main saves the full frame to `$TMPDIR/foxlogi-grid-capture.bmp` (`%TEMP%` on Windows). On the GDI path it's read in the same call as the strips.
     - The analysis runs in `gridDetect.worker.ts` (~70 ms at 4K, ~18 ms at 1080p), falling back to main if the worker can't run. Both workers use the small request/response helper in `workerRpc.ts`.
   - The result is fitted to the viewport as it was when the frame was taken, and pans made since (map drags during the capture) are replayed on top. Otherwise the grid would snap back by the drag.
@@ -130,6 +130,7 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
   - A grid counts only with both vertical and horizontal lines, so a success always carries both alignments (`xLine`, `yLine`).
     - Both axes must be significant, or one very strong axis must be confirmed by the other.
     - Each axis's lattice must also recur across its strips (`stripSupport`, p < 0.01). This rejects strips whose own periodic lines merely line up in two of them.
+    - Zoomed far in, the game also draws the much fainter 3×3 keypad lines (~0–3 luma levels against ~6–12), so the lattice can fit a keypad square, a third of the cell. `keypadClass` measures the darkness straight from the pixels at every lattice position, averaged over all strips, per class mod 3. Only when one class is at least 2.2× darker than the next on both axes is the cell 3× the period, with each axis's lines in its darkest class. Measured: keypad lattice 2.8–3.0; a true cell lattice at keypad zoom ≤ 1.8; ordinary grids 1.0–1.3. Counting detected lines per class instead misfires: with big cells there are only 4–6 lines per axis.
   - Tune the thresholds on real screenshots; the game's lines are only ~5–13 luma levels deep. On macOS this needs Screen Recording permission.
 
 ## Platform constraints worth knowing

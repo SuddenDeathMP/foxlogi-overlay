@@ -30,6 +30,7 @@ export default function CalibrationPane({ vp, kind }: Props): React.ReactElement
   const { message } = AntdApp.useApp()
   const setViewport = useArtillery((s) => s.setViewport)
   const setCalibrating = useArtillery((s) => s.setCalibrating)
+  const setGridStatus = useArtillery((s) => s.setGridStatus)
   const [rect, setRect] = useState<{ a: Vec; b: Vec } | null>(null)
   const dragging = useRef(false)
 
@@ -49,6 +50,7 @@ export default function CalibrationPane({ vp, kind }: Props): React.ReactElement
         return
       }
       setViewport(next)
+      setGridStatus({ kind: 'manual', at: Date.now() })
       setCalibrating(false)
       message.success(`Scale calibrated from hex height: ${Math.abs(b.y - a.y).toFixed(0)} px = ${HEX_HEIGHT.toFixed(0)} m.`)
       return
@@ -59,6 +61,7 @@ export default function CalibrationPane({ vp, kind }: Props): React.ReactElement
       return
     }
     setViewport(next)
+    setGridStatus({ kind: 'manual', at: Date.now() })
     setCalibrating(false)
     message.success('Grid calibrated.')
   }

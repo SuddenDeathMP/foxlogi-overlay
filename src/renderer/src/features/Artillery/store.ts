@@ -11,6 +11,13 @@ export type UnitKind = 'gun' | 'target'
 /** Manual calibration: drag across one grid cell, or a hex's full height. */
 export type CalibrationKind = 'cell' | 'hex'
 
+/** How the grid was last set: an auto-detect result, or a manual calibration
+ *  since. `at` is ms epoch. */
+export type GridStatus =
+  | { kind: 'found'; cellPx: number; at: number }
+  | { kind: 'not-found' | 'failed'; error: string; at: number }
+  | { kind: 'manual'; at: number }
+
 export interface ArtyUnit {
   id: string
   kind: UnitKind
@@ -57,6 +64,8 @@ interface ArtilleryState {
   calibrating: CalibrationKind | false
   /** Grid auto-detect in progress (not persisted). */
   detecting: boolean
+  /** Last auto-detect outcome or manual calibration; null before any (not persisted). */
+  gridStatus: GridStatus | null
   /** Hide the overlay while the in-game map is closed (watches the screen). */
   hideWithMap: boolean
   /** In-game map open? null while not watching (not persisted). */
@@ -78,6 +87,7 @@ interface ArtilleryState {
   setMode: (mode: ArtyMode) => void
   setCalibrating: (kind: CalibrationKind | false) => void
   setDetecting: (on: boolean) => void
+  setGridStatus: (status: GridStatus) => void
   setHideWithMap: (on: boolean) => void
   setMapWatch: (patch: { mapOpen?: boolean | null; mapProbe?: ArtilleryState['mapProbe'] }) => void
   setViewport: (vp: Viewport) => void
@@ -97,6 +107,7 @@ export const useArtillery = create<ArtilleryState>()(
       mode: 'off',
       calibrating: false,
       detecting: false,
+      gridStatus: null,
       hideWithMap: true,
       mapOpen: null,
       mapProbe: null,
@@ -111,6 +122,7 @@ export const useArtillery = create<ArtilleryState>()(
       setMode: (mode) => set(mode === 'off' ? { mode, calibrating: false } : { mode }),
       setCalibrating: (calibrating) => set({ calibrating }),
       setDetecting: (detecting) => set({ detecting }),
+      setGridStatus: (gridStatus) => set({ gridStatus }),
       setHideWithMap: (hideWithMap) => set({ hideWithMap }),
       setMapWatch: (patch) => set(patch),
       setViewport: (viewport) => set({ viewport }),

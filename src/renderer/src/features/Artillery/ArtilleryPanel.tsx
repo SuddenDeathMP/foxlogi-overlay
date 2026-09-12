@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { App as AntdApp, Button, Dropdown, Flex, InputNumber, Popconfirm, Space, Switch, Tag, Tooltip, Typography } from 'antd'
-import { BorderOuterOutlined, CloseOutlined, ColumnHeightOutlined, DeleteOutlined, ScanOutlined } from '@ant-design/icons'
+import {
+  BorderOuterOutlined,
+  CloseOutlined,
+  ColumnHeightOutlined,
+  DeleteOutlined,
+  LoadingOutlined,
+  ScanOutlined
+} from '@ant-design/icons'
 import { C } from '../../theme/graphite'
 import { useApp } from '../../stores/appStore'
 import { useArtillery, type ArtyUnit, type CalibrationKind } from './store'
@@ -41,6 +48,52 @@ function CalibrateOption({ title, hint }: { title: string; hint: string }): Reac
       <div>{title}</div>
       <div style={{ fontSize: 11, lineHeight: 1.4, color: C.text3 }}>{hint}</div>
     </div>
+  )
+}
+
+/** How the grid was last set, next to the Edit mode switch: a live read on
+ *  whether automatic re-detects (map open, zoom, drag) are landing. */
+function GridStatusLabel(): React.ReactElement {
+  const detecting = useArtillery((s) => s.detecting)
+  const status = useArtillery((s) => s.gridStatus)
+  const time = status ? new Date(status.at).toLocaleTimeString() : ''
+
+  let color: string = C.text3
+  let text = 'Grid not set'
+  let tip: React.ReactNode = 'Auto-detect or calibrate the grid.'
+  if (detecting) {
+    text = 'Detecting…'
+    tip = 'Looking for the map grid on screen.'
+  } else if (status?.kind === 'found') {
+    color = C.positive
+    text = `Grid ${status.cellPx.toFixed(1)} px`
+    tip = `Detected at ${time}: ${status.cellPx.toFixed(1)} px per 125 m cell.`
+  } else if (status?.kind === 'manual') {
+    color = C.accent
+    text = 'Calibrated'
+    tip = `Calibrated by hand at ${time}.`
+  } else if (status) {
+    color = status.kind === 'not-found' ? C.warning : C.danger
+    text = status.kind === 'not-found' ? 'Grid not found' : 'Detect failed'
+    tip = `${time}: ${status.error}`
+  }
+
+  return (
+    <Tooltip title={tip}>
+      <Flex
+        align="center"
+        justify="flex-end"
+        gap={6}
+        style={{ flex: 1, minWidth: 0, fontSize: 12, color: detecting ? C.text3 : color }}
+      >
+        {detecting ? (
+          <LoadingOutlined />
+        ) : (
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flex: 'none' }} />
+        )}
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
+      </Flex>
+    </Tooltip>
   )
 }
 
@@ -167,20 +220,21 @@ export default function ArtilleryPanel(): React.ReactElement {
           </Tooltip>
         </Flex>
 
-        <Tooltip title="Show the grid and right-click the map to place guns and targets">
-          <Flex justify="space-between" align="center" gap={8}>
-            <Text>Edit mode</Text>
-            <Switch
-              size="small"
-              checked={mode === 'edit'}
-              onChange={(on) => {
-                setMode(on ? 'edit' : 'locked')
-                // Entering Edit mode re-syncs to the game's grid first.
-                if (on) void runAutoDetect(message)
-              }}
-            />
-          </Flex>
-        </Tooltip>
+        <Flex align="center" gap={8}>
+          <Tooltip title="Show the grid and right-click the map to place guns and targets">
+            <Text style={{ whiteSpace: 'nowrap' }}>Edit mode</Text>
+          </Tooltip>
+          <Switch
+            size="small"
+            checked={mode === 'edit'}
+            onChange={(on) => {
+              setMode(on ? 'edit' : 'locked')
+              // Entering Edit mode re-syncs to the game's grid first.
+              if (on) void runAutoDetect(message)
+            }}
+          />
+          <GridStatusLabel />
+        </Flex>
 
         {activeGun && activeTarget && activeSol ? (
           <ActiveSolution gun={activeGun} target={activeTarget} sol={activeSol} />

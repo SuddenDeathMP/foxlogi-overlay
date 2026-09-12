@@ -34,6 +34,11 @@ export interface AxisCandidates {
   lines: number[]
 }
 
+/** One strip's candidates, plus its mean luma along the strip (keypadClass). */
+export interface StripCandidates extends AxisCandidates {
+  profile: Float32Array
+}
+
 export interface AxisFit {
   axis: Axis
   /** Line-centre spacing = gap + one line thickness = one grid cell. */
@@ -85,6 +90,10 @@ const CONFIRM_SIGNIFICANCE = 1.3
  *  Measured: real grids 8.8–13; strips shifted out of line, at most 2.7 on one
  *  axis and 1.5 on the other. */
 const STRIP_SIGNIFICANCE = 2
+/** Keypad lattice (keypadClass): on both axes, one lattice class in three is
+ *  this many times darker than the next. Measured: keypad zoom 2.8–3.0 on each
+ *  axis; a true cell lattice at keypad zoom at most 1.8; ordinary grids 1.0–1.3. */
+const KEYPAD_RATIO = 2.2
 /** Hits in the lattice positions a harmonic adds are "chance" below p = 0.01. */
 const HARMONIC_SIGNIFICANCE = 2
 const MAX_CANDIDATES = 300
@@ -151,8 +160,8 @@ function highPass(row: Float32Array, k: number): Float32Array {
   return out
 }
 
-/** Centres of dark, grid-line-shaped features. */
-function findLines(rows: Float32Array[], k: number, scale: number): number[] {
+/** Centres of dark, grid-line-shaped features, and the strip's mean luma profile. */
+function findLines(rows: Float32Array[], k: number, scale: number): { lines: number[]; profile: Float32Array } {
   const n = rows[0].length
   const D = rows.length
   // Average the rows (noise down, diagonal features smear out wider than a
@@ -205,16 +214,16 @@ function findLines(rows: Float32Array[], k: number, scale: number): number[] {
     i = j
   }
   const kept = out.length > MAX_CANDIDATES ? [...out].sort((a, b) => b.peak - a.peak).slice(0, MAX_CANDIDATES) : out
-  return kept.map((c) => c.center).sort((a, b) => a - b)
+  return { lines: kept.map((c) => c.center).sort((a, b) => a - b), profile }
 }
 
 /** Line candidates crossing one strip: horizontal for 'x', vertical for 'y'.
  *  `scale` = physical/logical px. */
-export function stripCandidates(strip: Strip, axis: Axis, scale: number): AxisCandidates {
+export function stripCandidates(strip: Strip, axis: Axis, scale: number): StripCandidates {
   const alongX = axis === 'x'
   const length = alongX ? strip.width : strip.height
   const k = Math.max(4, Math.round(6 * scale))
-  return { axis, length, scale, lines: findLines(edgeRows(strip, alongX), k, scale) }
+  return { axis, length, scale, ...findLines(edgeRows(strip, alongX), k, scale) }
 }
 
 /**
@@ -470,6 +479,50 @@ function stripSupport(strips: AxisCandidates[], fit: AxisFit): number {
   return significance(hit, strips.length, chance / strips.length)
 }
 
+/** How much darker the line at `c` is than its surroundings on a strip's luma
+ *  profile: the flanks (2.5–6 line widths out) minus the darkest core pixel,
+ *  clamped to [0, MAX_CONTRAST]. Null too close to the strip's ends. */
+function lineDip(profile: Float32Array, c: number, scale: number): number | null {
+  const core = Math.max(1, Math.round(scale))
+  const f0 = Math.round(2.5 * scale)
+  const f1 = Math.round(6 * scale)
+  const at = Math.round(c)
+  if (at - f1 < 0 || at + f1 >= profile.length) return null
+  let min = Infinity
+  for (let i = at - core; i <= at + core; i++) min = Math.min(min, profile[i])
+  let sum = 0
+  for (let o = f0; o <= f1; o++) sum += profile[at - o] + profile[at + o]
+  return Math.min(MAX_CONTRAST, Math.max(0, sum / (2 * (f1 - f0 + 1)) - min))
+}
+
+/**
+ * Zoomed far in, the game also draws the 3×3 keypad lines inside each cell.
+ * They pass the line filter, so the lattice can fit the keypad: a third of the
+ * cell, with every real line still on it. They're much fainter, though (~0–3
+ * luma levels against ~6–12): measured straight from the pixels at each
+ * lattice position, averaged over all strips, one class in three is then far
+ * darker. Returns that class (0–2) and how many times darker than the next it
+ * is. Counting detected lines instead doesn't work: with big cells there are
+ * only 4–6 lines per axis, so one class can hold twice the lines by chance.
+ */
+function keypadClass(strips: StripCandidates[], fit: AxisFit): { cls: number; ratio: number } {
+  const { scale, length } = strips[0]
+  const sum = [0, 0, 0]
+  const count = [0, 0, 0]
+  for (let k = 0; fit.phase + k * fit.period < length; k++) {
+    const dips = strips
+      .map((s) => lineDip(s.profile, fit.phase + k * fit.period, scale))
+      .filter((d): d is number => d != null)
+    if (!dips.length) continue
+    sum[k % 3] += dips.reduce((a, b) => a + b, 0) / dips.length
+    count[k % 3]++
+  }
+  const mean = sum.map((s, i) => (count[i] ? s / count[i] : 0))
+  const cls = mean.indexOf(Math.max(...mean))
+  const next = Math.max(...mean.filter((_, i) => i !== cls))
+  return { cls, ratio: mean[cls] / Math.max(next, 0.05) }
+}
+
 /** The grid in one frame's strips (see stripLayout): `h` horizontal, `v` vertical. */
 export function detectGridInStrips(h: Strip[], v: Strip[], scale: number): GridDetection {
   const hc = h.map((s) => stripCandidates(s, 'x', scale))
@@ -481,5 +534,17 @@ export function detectGridInStrips(h: Strip[], v: Strip[], scale: number): GridD
     stripSupport(hc, fx) < STRIP_SIGNIFICANCE ? fx : null,
     stripSupport(vc, fy) < STRIP_SIGNIFICANCE ? fy : null
   ]
-  return weak.some(Boolean) ? { ok: false, fits: result.fits.filter((f) => !weak.includes(f)) } : result
+  if (weak.some(Boolean)) return { ok: false, fits: result.fits.filter((f) => !weak.includes(f)) }
+
+  // Keypad lines run both ways, so both axes must show the pattern. Each axis's
+  // real lines are its own darkest class.
+  const kx = keypadClass(hc, fx)
+  const ky = keypadClass(vc, fy)
+  if (kx.ratio < KEYPAD_RATIO || ky.ratio < KEYPAD_RATIO) return result
+  return {
+    ...result,
+    period: result.period * 3,
+    xLine: fx.phase + kx.cls * fx.period,
+    yLine: fy.phase + ky.cls * fy.period
+  }
 }

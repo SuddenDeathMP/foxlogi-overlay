@@ -108,6 +108,7 @@ export default function ArtilleryLayer({ hidden }: Props): React.ReactElement | 
   const activeTargetId = useArtillery((s) => s.activeTargetId)
   const selectedId = useArtillery((s) => s.selectedId)
   const mapProbe = useArtillery((s) => s.mapProbe)
+  const detecting = useArtillery((s) => s.detecting)
   const wind = useArtillery((s) => s.wind)
   const lastPlatform = useArtillery((s) => s.lastPlatform)
   const setViewport = useArtillery((s) => s.setViewport)
@@ -289,7 +290,8 @@ export default function ArtilleryLayer({ hidden }: Props): React.ReactElement | 
       {capturing && <div className="interactive-tint" />}
 
       <svg width={size.w} height={size.h} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-        {editing && <GridLines vp={vp} width={size.w} height={size.h} />}
+        {/* Hidden during auto-detect: our lines would be read as the game's. */}
+        {editing && !detecting && <GridLines vp={vp} width={size.w} height={size.h} />}
 
         {/* Active gun reach: min–max range annulus, shifted downwind. */}
         {ringCentre && gunSpecs && (

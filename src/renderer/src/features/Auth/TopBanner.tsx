@@ -40,7 +40,8 @@ export default function TopBanner({ onOpenSettings, tab, onTabChange, toggleSpac
     >
       {/*{interactive && <div className="interactive-tint" />}*/}
       <Space size={GAP}>
-        <img width="28" src={logo} alt="foxlogi" style={{marginTop: 5, opacity: 0.75}}/>
+        {/* Block, so it's exactly as tall as the bar's controls (no inline line box). */}
+        <img width="28" height="28" src={logo} alt="foxlogi" style={{ display: 'block', opacity: 0.75 }} />
         <Popconfirm
           title="Turn off the overlay?"
           okText="Turn off"

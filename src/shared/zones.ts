@@ -17,6 +17,8 @@ export interface ZoneRect {
 export type ZoneName = 'top' | 'left' | 'bottom'
 
 export const ZONE_FRACTIONS: Record<ZoneName, ZoneRect> = {
+  // The renderer moves the top banner a few px down and sizes its height to its
+  // controls (App.tsx: topRect), so only x and w are used from here.
   top: { x: 0.09, y: 0, w: 0.19, h: 0.06 },
   left: { x: 0.0, y: 0.11, w: 0.16, h: 0.58 },
   bottom: { x: 0.18, y: 0.61, w: 0.52, h: 0.39 }

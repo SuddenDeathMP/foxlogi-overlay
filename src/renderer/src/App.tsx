@@ -29,6 +29,8 @@ const ARTY_EDGE_GAP = 25
  *  edge (1px surface border + 12px padding). */
 const TOGGLE_SIZE = graphiteTheme.token.controlHeightSM
 const TOGGLE_INSET = 13
+/** Gap between the top banner and the screen's top edge, px. */
+const TOP_GAP = 10
 /** After a wheel step over the artillery map, cursor moves within this radius
  *  (px) and time (ms) don't re-grab the mouse from the game. */
 const WHEEL_HOLD_PX = 8
@@ -216,9 +218,12 @@ export default function App(): React.ReactElement {
   }, [auth?.authenticated, setItems])
 
   const z = zones?.zones
+  // The top banner hangs TOP_GAP below the screen edge and is sized to its
+  // controls, with the same inset above and below them as at its sides.
+  const topRect = z?.top && { ...z.top, y: z.top.y + TOP_GAP, h: TOGGLE_SIZE + 2 * TOGGLE_INSET }
   // One collapse/expand toggle, pinned at the top banner's left edge in both
   // states so it can be clicked at the same spot; zones fly into its centre.
-  const togglePos = { x: (z?.top?.x ?? 0) + TOGGLE_INSET, y: (z?.top?.y ?? 0) + ((z?.top?.h ?? 40) - TOGGLE_SIZE) / 2 }
+  const togglePos = { x: (topRect?.x ?? 0) + TOGGLE_INSET, y: (topRect?.y ?? 0) + TOGGLE_INSET }
   const collapseTo = { x: togglePos.x + TOGGLE_SIZE / 2, y: togglePos.y + TOGGLE_SIZE / 2 }
 
   return (
@@ -229,7 +234,7 @@ export default function App(): React.ReactElement {
       </ConfigProvider>
 
       {/* Grows with its buttons/tags so nothing in the bar gets clipped. */}
-      <Zone rect={z?.top} hidden={hidden} collapseTo={collapseTo} growToContent>
+      <Zone rect={topRect} hidden={hidden} collapseTo={collapseTo} growToContent>
         <TopBanner
           onOpenSettings={() => setShowSettings(true)}
           tab={artyOn ? ARTILLERY_TAB : activeTab}
@@ -261,7 +266,7 @@ export default function App(): React.ReactElement {
       </Zone>
 
       {/* Collapse/expand toggle: outside the zones so it stays put in both states. */}
-      {z?.top && (
+      {topRect && (
         <div className="overlay-toggle" style={{ left: togglePos.x, top: togglePos.y }}>
           <Tooltip title={hidden ? 'Expand overlay' : 'Collapse overlay'} placement="bottom">
             <Button
