@@ -6,6 +6,7 @@ import { useArtillery, type ArtyUnit } from './store'
 import GridLines from './GridLines'
 import UnitMarker, { labelShadow } from './UnitMarker'
 import CalibrationPane from './CalibrationPane'
+import { HIT_FILL } from './ui'
 import { GUN_ICON, SHELL_ICON, platformIcon } from './icons'
 import { SHELLS, platformsOf, specsOf } from './lib/platforms'
 import { solve, windOffset } from './lib/solution'
@@ -275,6 +276,8 @@ export default function ArtilleryLayer({ hidden }: Props): React.ReactElement | 
         // a click on the map closes the menu instead of going to the game and
         // leaving the menu stuck open.
         pointerEvents: capturing || ctx ? 'auto' : 'none',
+        // Windows passes clicks through fully transparent pixels.
+        background: capturing || ctx ? HIT_FILL : undefined,
         // Map watch: never paint over the corner main is capturing, or our own
         // drawings would hide the game's map icon from it.
         clipPath: mapProbe

@@ -1,17 +1,19 @@
-// Finds the in-game map grid from thin strips along the screen edges. Pure (no
+// Finds the in-game map grid from thin strips laid across the screen. Pure (no
 // electron imports) so it can be exercised from a plain Node script on a
 // screenshot. All positions are in the captured image's physical pixels.
 //
-// Grid lines cross the screen edges as short straight segments perpendicular
-// to the edge, evenly spaced one cell apart. They're darker than the map,
-// faint (~5–13 luma levels) and exactly 2 px thick per logical px (4 px at 2x).
-// Per strip: high-pass each row along the edge ("sharpen"), keep features that
-// look like such a line across the strip depth as candidates. Then search one
-// cell size for all edges together, scoring each edge by how unlikely its
-// lattice hits would be by chance — so edges with clean lines carry the ones
-// with busy terrain — and step up from harmonics (a lattice at a half or third
-// of the cell also contains every real line).
-import type { GridEdge } from '@shared/types'
+// Grid lines cross a strip as short straight segments perpendicular to it,
+// evenly spaced one cell apart. They're darker than the map, faint (~5–13 luma
+// levels) and exactly 2 px thick per logical px (4 px at 2x). The game draws
+// them only inside the current region hex, so any one strip may see few or
+// none of them (the screen edges often lie outside the region).
+// Per strip: high-pass each row along the strip ("sharpen"), keep features
+// that look like such a line across the strip depth as candidates. Per axis,
+// keep positions that several parallel strips agree on (a grid line is
+// straight across the screen; terrain isn't). Then search one cell size for
+// both axes together, scoring each by how unlikely its lattice hits would be
+// by chance, and step up from harmonics (a lattice at a half or third of the
+// cell also contains every real line).
 
 /** A cropped BGRA (or RGBA — luma below is order-agnostic) pixel buffer. */
 export interface Strip {
@@ -20,21 +22,25 @@ export interface Strip {
   height: number
 }
 
-/** Line candidates (centres along the edge) found in one edge strip. */
-export interface EdgeCandidates {
-  edge: GridEdge
+/** Which way the lines are measured: 'x' = positions along a horizontal strip
+ *  (vertical grid lines), 'y' = along a vertical strip (horizontal lines). */
+export type Axis = 'x' | 'y'
+
+/** Line candidates (centres along the strip) for one axis. */
+export interface AxisCandidates {
+  axis: Axis
   length: number
   scale: number
   lines: number[]
 }
 
-export interface EdgeFit {
-  edge: GridEdge
+export interface AxisFit {
+  axis: Axis
   /** Line-centre spacing = gap + one line thickness = one grid cell. */
   period: number
-  /** Position of one line along the edge (0 ≤ phase < period). */
+  /** Position of one line along the axis (0 ≤ phase < period). */
   phase: number
-  /** Lattice positions with a detected line / lattice positions on the edge. */
+  /** Lattice positions with a detected line / lattice positions on the axis. */
   hits: number
   expected: number
   /** Lattice indices that have a line. */
@@ -46,11 +52,17 @@ export interface EdgeFit {
 }
 
 export type GridDetection =
-  | { ok: true; period: number; xLine?: number; yLine?: number; fits: EdgeFit[] }
-  | { ok: false; fits: EdgeFit[] }
+  | { ok: true; period: number; xLine: number; yLine: number; fits: AxisFit[] }
+  | { ok: false; fits: AxisFit[] }
 
-/** Strip depth into the screen, logical px (20 physical px on a 2x display). */
+/** Strip depth, logical px (20 physical px on a 2x display). */
 export const STRIP_DEPTH = 10
+/** Parallel strips per axis, evenly spaced from one screen edge to the other. */
+const H_STRIPS = 12
+const V_STRIPS = 16
+/** A line position counts when this many strips show it. 3 already loses the
+ *  grid when only part of the screen lies inside the current region. */
+const MIN_SUPPORT = 2
 
 /** Line contrast range in luma levels: the game's lines are translucent, so
  *  much stronger features (text, icon and panel edges) aren't grid lines. */
@@ -62,22 +74,45 @@ const MAX_REL_CONTRAST = 0.08
 /** Smallest cell worth detecting, logical px. */
 const MIN_CELL_LOGICAL = 30
 const MIN_HITS = 2
-/** An edge counts as showing the grid at p < 10^-2 against chance hits… */
-const EDGE_SIGNIFICANCE = 2
-const MIN_EDGES = 2
-/** …and the edges together at p < 10^-6. */
+/** An axis counts as showing the grid at p < 10^-2 against chance hits… */
+const AXIS_SIGNIFICANCE = 2
+/** …and both axes together at p < 10^-6. */
 const MIN_TOTAL_SIGNIFICANCE = 6
-/** Or: one edge at p < 10^-5, confirmed on the other axis at p < 0.05. */
+/** Or: one axis at p < 10^-5, confirmed on the other at p < 0.05. */
 const ANCHOR_SIGNIFICANCE = 5
 const CONFIRM_SIGNIFICANCE = 1.3
+/** Each axis's lattice must recur across its strips at p < 10^-2 (stripSupport).
+ *  Measured: real grids 8.8–13; strips shifted out of line, at most 2.7 on one
+ *  axis and 1.5 on the other. */
+const STRIP_SIGNIFICANCE = 2
 /** Hits in the lattice positions a harmonic adds are "chance" below p = 0.01. */
 const HARMONIC_SIGNIFICANCE = 2
 const MAX_CANDIDATES = 300
 
-/** Which image axis runs along each edge. */
-const ALONG_X: Record<GridEdge, boolean> = { top: true, bottom: true, left: false, right: false }
+/** A strip's rect in the captured frame, physical px. */
+export interface StripRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
-/** Luma per pixel, reorganised as D rows of length L running along the edge. */
+/**
+ * Where to read strips in a W×H frame: H_STRIPS horizontal and V_STRIPS
+ * vertical ones, STRIP_DEPTH logical px deep, evenly spaced and including the
+ * screen edges. `scale` = physical/logical px.
+ */
+export function stripLayout(W: number, H: number, scale: number): { h: StripRect[]; v: StripRect[] } {
+  const D = Math.min(Math.round(STRIP_DEPTH * scale), W, H)
+  const spread = (n: number, span: number): number[] =>
+    Array.from({ length: n }, (_, i) => Math.round((i * (span - D)) / (n - 1)))
+  return {
+    h: spread(H_STRIPS, H).map((y) => ({ x: 0, y, width: W, height: D })),
+    v: spread(V_STRIPS, W).map((x) => ({ x, y: 0, width: D, height: H }))
+  }
+}
+
+/** Luma per pixel, reorganised as D rows of length L running along the strip. */
 function edgeRows(s: Strip, alongX: boolean): Float32Array[] {
   const L = alongX ? s.width : s.height
   const D = alongX ? s.height : s.width
@@ -173,12 +208,39 @@ function findLines(rows: Float32Array[], k: number, scale: number): number[] {
   return kept.map((c) => c.center).sort((a, b) => a - b)
 }
 
-/** Line candidates crossing one edge strip. `scale` = physical/logical px. */
-export function edgeCandidates(strip: Strip, edge: GridEdge, scale: number): EdgeCandidates {
-  const alongX = ALONG_X[edge]
+/** Line candidates crossing one strip: horizontal for 'x', vertical for 'y'.
+ *  `scale` = physical/logical px. */
+export function stripCandidates(strip: Strip, axis: Axis, scale: number): AxisCandidates {
+  const alongX = axis === 'x'
   const length = alongX ? strip.width : strip.height
   const k = Math.max(4, Math.round(6 * scale))
-  return { edge, length, scale, lines: findLines(edgeRows(strip, alongX), k, scale) }
+  return { axis, length, scale, lines: findLines(edgeRows(strip, alongX), k, scale) }
+}
+
+/**
+ * One axis's lines from its parallel strips: positions (within the lattice
+ * tolerance) that at least MIN_SUPPORT different strips show, at their mean. A
+ * grid line runs straight across the screen, so it recurs from strip to strip
+ * wherever the region's grid is drawn; terrain and text don't.
+ */
+export function consensusLines(strips: AxisCandidates[]): AxisCandidates {
+  const { axis, length, scale } = strips[0]
+  const all = strips.flatMap((s, i) => s.lines.map((c) => ({ c, strip: i }))).sort((a, b) => a.c - b.c)
+  const tol = tolFor(scale)
+  const lines: number[] = []
+  for (let i = 0; i < all.length; ) {
+    let j = i
+    let sum = 0
+    const seenIn = new Set<number>()
+    while (j < all.length && all[j].c - all[i].c <= 2 * tol) {
+      seenIn.add(all[j].strip)
+      sum += all[j].c
+      j++
+    }
+    if (seenIn.size >= MIN_SUPPORT) lines.push(sum / (j - i))
+    i = j
+  }
+  return { axis, length, scale, lines }
 }
 
 // ---- lattice scoring -------------------------------------------------------
@@ -225,8 +287,8 @@ function bestPhase(centers: number[], p: number, tol: number): number {
   return best % p
 }
 
-/** Fit a lattice of roughly `period` to one edge's candidates (free phase). */
-function fitEdge(e: EdgeCandidates, period: number): EdgeFit | null {
+/** Fit a lattice of roughly `period` to one axis's lines (free phase). */
+function fitAxis(e: AxisCandidates, period: number): AxisFit | null {
   const centers = e.lines
   if (centers.length < MIN_HITS) return null
   const tol0 = tolFor(e.scale)
@@ -260,8 +322,8 @@ function fitEdge(e: EdgeCandidates, period: number): EdgeFit | null {
   return fit
 }
 
-/** Score a fixed lattice (period, phase) against one edge's candidates. */
-function scoreLattice(e: EdgeCandidates, p: number, phase: number): EdgeFit | null {
+/** Score a fixed lattice (period, phase) against one axis's lines. */
+function scoreLattice(e: AxisCandidates, p: number, phase: number): AxisFit | null {
   const tol = tolFor(e.scale)
   const expected = Math.floor((e.length - 1 - phase) / p) + 1
   const ks = new Set<number>()
@@ -274,7 +336,7 @@ function scoreLattice(e: EdgeCandidates, p: number, phase: number): EdgeFit | nu
   // Chance of a random candidate landing within ±tol of a lattice position.
   const chance = Math.min(0.95, (e.lines.length / e.length) * 2 * tol)
   return {
-    edge: e.edge,
+    axis: e.axis,
     period: p,
     phase,
     hits,
@@ -285,46 +347,8 @@ function scoreLattice(e: EdgeCandidates, p: number, phase: number): EdgeFit | nu
   }
 }
 
-/** Summed per-edge evidence (negative significances count as zero). */
-const totalScore = (fits: EdgeFit[]): number => fits.reduce((s, f) => s + Math.max(0, f.significance), 0)
-
-/**
- * Fits for one axis (top+bottom share x positions, left+right share y) at a
- * period hypothesis. Opposite edges see the same lines, so the second edge is
- * checked at the first one's exact lattice (no free phase, no discount) — a
- * strong consistency test that chance alignments fail.
- */
-function axisFits(a: EdgeCandidates | undefined, b: EdgeCandidates | undefined, period: number): EdgeFit[] {
-  const fa = a ? fitEdge(a, period) : null
-  const fb = b ? fitEdge(b, period) : null
-  const options: EdgeFit[][] = []
-  if (fa) options.push([fa])
-  if (fb) options.push([fb])
-  // Both edges fitted on their own only count together if they put the lines
-  // in the same place (they must: the lines run straight across the screen).
-  if (fa && fb) {
-    const d = Math.abs(fa.phase - fb.phase) % fa.period
-    if (Math.min(d, fa.period - d) <= 2 * tolFor(a!.scale)) options.push([fa, fb])
-  }
-  for (const [src, other] of [
-    [fa, b],
-    [fb, a]
-  ] as const) {
-    if (!src || !other) continue
-    const fixed = scoreLattice(other, src.period, src.phase)
-    if (fixed) options.push([src, fixed])
-  }
-  let best: EdgeFit[] = []
-  let bestScore = 0
-  for (const o of options) {
-    const s = totalScore(o)
-    if (s > bestScore) {
-      best = o
-      bestScore = s
-    }
-  }
-  return best
-}
+/** Summed per-axis evidence (negative significances count as zero). */
+const totalScore = (fits: AxisFit[]): number => fits.reduce((s, f) => s + Math.max(0, f.significance), 0)
 
 /**
  * A lattice at the cell size / m also contains every real line, and can outscore
@@ -332,7 +356,7 @@ function axisFits(a: EdgeCandidates | undefined, b: EdgeCandidates | undefined, 
  * lattice positions outside the best residue class mod m are hit no more often
  * than chance, i.e. the real period is m times larger; 1 otherwise.
  */
-function harmonicFactor(fits: EdgeFit[]): number {
+function harmonicFactor(fits: AxisFit[]): number {
   for (const m of [2, 3]) {
     let otherHits = 0
     let otherPositions = 0
@@ -345,7 +369,7 @@ function harmonicFactor(fits: EdgeFit[]): number {
       for (const k of f.hitIdx) hits[k % m]++
       let keep = 0
       for (let c = 1; c < m; c++) if (hits[c] > hits[keep]) keep = c
-      // The coarser lattice must still hold lines on this edge.
+      // The coarser lattice must still hold lines on this axis.
       if (hits[keep] < 2) valid = false
       for (let c = 0; c < m; c++) {
         if (c === keep) continue
@@ -361,16 +385,18 @@ function harmonicFactor(fits: EdgeFit[]): number {
 }
 
 /**
- * Find one cell size shared by the edges. Every pairwise gap between candidates
+ * Find one cell size shared by both axes. Every pairwise gap between lines
  * (and its halves/thirds, for missed lines) is a period hypothesis; the winner
- * maximises the summed significance across edges, then steps up from harmonics.
+ * maximises the summed significance of the two axes, then steps up from
+ * harmonics. Success always has both axes, so both line positions.
  */
-export function detectGrid(edges: EdgeCandidates[], scale: number): GridDetection {
+export function detectGrid(x: AxisCandidates, y: AxisCandidates, scale: number): GridDetection {
+  const axes = [x, y]
   const minP = MIN_CELL_LOGICAL * scale
-  const maxP = Math.min(...edges.map((e) => e.length)) / 2
+  const maxP = Math.min(x.length, y.length) / 2
 
   const periods = new Set<number>()
-  for (const { lines: c } of edges) {
+  for (const { lines: c } of axes) {
     for (let i = 0; i < c.length; i++) {
       for (let j = i + 1; j < c.length; j++) {
         for (let n = 1; n <= 3; n++) {
@@ -381,12 +407,11 @@ export function detectGrid(edges: EdgeCandidates[], scale: number): GridDetectio
     }
   }
 
-  const on = (name: GridEdge): EdgeCandidates | undefined => edges.find((e) => e.edge === name)
-  const fitsAt = (p: number): EdgeFit[] => [...axisFits(on('top'), on('bottom'), p), ...axisFits(on('left'), on('right'), p)]
+  const fitsAt = (p: number): AxisFit[] => axes.map((a) => fitAxis(a, p)).filter((f): f is AxisFit => f != null)
 
   let bestScore = 0
   let bestP = 0
-  let bestFits: EdgeFit[] = []
+  let bestFits: AxisFit[] = []
   for (const p of periods) {
     const fits = fitsAt(p)
     const score = totalScore(fits)
@@ -405,29 +430,56 @@ export function detectGrid(edges: EdgeCandidates[], scale: number): GridDetectio
     bestFits = fitsAt(bestP)
   }
 
-  let strong = bestFits.filter((f) => f.significance >= EDGE_SIGNIFICANCE)
-  if (strong.length < MIN_EDGES || totalScore(strong) < MIN_TOTAL_SIGNIFICANCE) {
-    // Big cells leave only 2–3 lines per side edge (and the macOS menu bar can
-    // hide the top). Also accept one very strong edge confirmed by an edge on
-    // the other axis showing lines at the same cell size.
-    const axis = (f: EdgeFit): boolean => ALONG_X[f.edge]
-    const bySig = [...bestFits].sort((a, b) => b.significance - a.significance)
-    const anchor = bySig[0]
-    const confirm = anchor && bySig.find((f) => axis(f) !== axis(anchor) && f.significance >= CONFIRM_SIGNIFICANCE)
-    if (!anchor || anchor.significance < ANCHOR_SIGNIFICANCE || !confirm) return { ok: false, fits: strong }
-    strong = [anchor, confirm]
+  const fx = bestFits.find((f) => f.axis === 'x')
+  const fy = bestFits.find((f) => f.axis === 'y')
+  const strong = bestFits.filter((f) => f.significance >= AXIS_SIGNIFICANCE)
+  // Both axes clearly show the grid. Or, since big cells leave only 2–3 lines
+  // on the short axis: one very strong axis, confirmed by the other showing
+  // lines at the same cell size.
+  const both = fx && fy && fx.significance >= AXIS_SIGNIFICANCE && fy.significance >= AXIS_SIGNIFICANCE
+  const [hi, lo] = fx && fy ? [fx, fy].sort((a, b) => b.significance - a.significance) : []
+  const anchored = hi && lo && hi.significance >= ANCHOR_SIGNIFICANCE && lo.significance >= CONFIRM_SIGNIFICANCE
+  if (!fx || !fy || !((both && totalScore(strong) >= MIN_TOTAL_SIGNIFICANCE) || anchored)) {
+    return { ok: false, fits: strong }
   }
 
-  // Weight each edge's refined period by its line count (longer baseline).
-  const total = strong.reduce((s, f) => s + f.hits, 0)
-  const period = strong.reduce((s, f) => s + f.period * f.hits, 0) / total
-  const bestOn = (on: GridEdge[]): EdgeFit | undefined =>
-    strong.filter((f) => on.includes(f.edge)).sort((a, b) => b.significance - a.significance)[0]
-  return {
-    ok: true,
-    period,
-    xLine: bestOn(['top', 'bottom'])?.phase,
-    yLine: bestOn(['left', 'right'])?.phase,
-    fits: strong
+  // Weight each axis's refined period by its line count (longer baseline).
+  const period = (fx.period * fx.hits + fy.period * fy.hits) / (fx.hits + fy.hits)
+  return { ok: true, period, xLine: fx.phase, yLine: fy.phase, fits: [fx, fy] }
+}
+
+/**
+ * How unlikely it is that this many strips have a line on the fitted lattice
+ * by chance, as −log10 p. Each strip's chance is set by its own candidate
+ * count. A real grid recurs in most strips it crosses. Strips with periodic
+ * lines that merely happen to line up in two of them (which consensus alone
+ * would accept) don't.
+ */
+function stripSupport(strips: AxisCandidates[], fit: AxisFit): number {
+  const tol = tolFor(strips[0].scale)
+  let hit = 0
+  let chance = 0
+  for (const s of strips) {
+    const onLattice = s.lines.some((c) => {
+      const d = (((c - fit.phase) % fit.period) + fit.period) % fit.period
+      return Math.min(d, fit.period - d) <= tol
+    })
+    if (onLattice) hit++
+    chance += 1 - Math.pow(1 - Math.min(1, (2 * tol) / fit.period), s.lines.length)
   }
+  return significance(hit, strips.length, chance / strips.length)
+}
+
+/** The grid in one frame's strips (see stripLayout): `h` horizontal, `v` vertical. */
+export function detectGridInStrips(h: Strip[], v: Strip[], scale: number): GridDetection {
+  const hc = h.map((s) => stripCandidates(s, 'x', scale))
+  const vc = v.map((s) => stripCandidates(s, 'y', scale))
+  const result = detectGrid(consensusLines(hc), consensusLines(vc), scale)
+  if (!result.ok) return result
+  const [fx, fy] = result.fits
+  const weak = [
+    stripSupport(hc, fx) < STRIP_SIGNIFICANCE ? fx : null,
+    stripSupport(vc, fy) < STRIP_SIGNIFICANCE ? fy : null
+  ]
+  return weak.some(Boolean) ? { ok: false, fits: result.fits.filter((f) => !weak.includes(f)) } : result
 }

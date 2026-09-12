@@ -5,8 +5,10 @@ import { targetDisplay } from './zones'
 import { getOverlay, isInteractive } from './window'
 import { MAP_ICON_REGION, MAP_ICON_THRESHOLD, REF_HEIGHT, mapIconScore } from './mapIcon'
 import { addGameInputListener, type MapKey } from './gameInput'
+import { grabScreen, isBlack, physicalBounds } from './screenGrab'
 
-/** Pause between captures. Each capture itself takes ~300 ms. */
+/** Pause between captures. A desktopCapturer capture itself takes ~300 ms (far
+ *  more on Windows); a GDI corner read on Windows takes milliseconds. */
 const POLL_MS = 80
 /** Consecutive "no icon" reads before polling alone reports the map closed.
  *  Opening needs just one: nothing but the map scores near the threshold. */
@@ -16,6 +18,9 @@ const CLOSE_READS = 2
 const KEY_SETTLE_MS = 100
 /** Quiet time after the last wheel step before the map counts as re-zoomed. */
 const ZOOM_SETTLE_MS = 400
+/** All-black GDI reads in a row before giving up on GDI for this watch (a
+ *  GPU/driver setup where GDI can't see the game). */
+const BLACK_READS = 3
 
 const PERMISSION_HINT =
   'Map detection needs Screen Recording: allow it for the overlay in System Settings → Privacy & Security, then restart it.'
@@ -31,6 +36,9 @@ let kicked = false
 let ignoreBefore = 0
 let zoomTimer: ReturnType<typeof setTimeout> | undefined
 let offInput: (() => void) | null = null
+/** Try the GDI corner read (Windows) this watch; off once its reads come back black. */
+let useGdi = false
+let blackReads = 0
 
 function push(state: MapOpenState): void {
   getOverlay()?.webContents.send(IPC.pushMapOpen, state)
@@ -48,8 +56,31 @@ function schedule(gen: number, delay: number): void {
   timer = setTimeout(() => void tick(gen), delay)
 }
 
-/** One capture of the display, scaled to REF_HEIGHT; returns the icon score. */
+/**
+ * The icon score from the fastest capture available. On Windows only the
+ * corner is read, with GDI (screenGrab.ts); desktopCapturer would capture and
+ * scale the whole display on every poll, which is slow there.
+ */
 async function readScore(): Promise<number> {
+  if (useGdi) {
+    // Physical px, top-right corner of the target display.
+    const phys = physicalBounds(targetDisplay())
+    const scale = phys.height / REF_HEIGHT
+    const width = Math.min(phys.width, Math.round(MAP_ICON_REGION.w * scale))
+    const height = Math.min(phys.height, Math.round(MAP_ICON_REGION.h * scale))
+    const frames = await grabScreen([{ x: phys.x + phys.width - width, y: phys.y, width, height }])
+    if (frames) {
+      blackReads = isBlack(frames[0]) ? blackReads + 1 : 0
+      if (blackReads < BLACK_READS) return mapIconScore(frames[0], scale)
+      console.warn('[mapWatch] GDI corner reads are black; using desktopCapturer')
+      useGdi = false
+    }
+  }
+  return readScoreCapturer()
+}
+
+/** One capture of the display, scaled to REF_HEIGHT; returns the icon score. */
+async function readScoreCapturer(): Promise<number> {
   const display = targetDisplay()
   const { width, height } = display.bounds
   const sources = await desktopCapturer.getSources({
@@ -137,6 +168,8 @@ export function startMapWatch(): MapWatchStart {
   closeReads = 0
   ignoreBefore = 0
   kicked = false
+  useGdi = process.platform === 'win32'
+  blackReads = 0
   schedule(gen, 0)
   offInput?.()
   offInput = addGameInputListener({ key: onMapKey, wheel: onWheel })

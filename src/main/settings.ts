@@ -7,12 +7,15 @@ import type { AppSettings } from '@shared/types'
 // builds to the local server. Not user-configurable.
 export const HOST = app.isPackaged ? 'https://foxlogi.com' : 'http://localhost:5173'
 
+const isMac = process.platform === 'darwin'
+
 const DEFAULTS: AppSettings = {
   host: HOST,
   displayId: null,
   // Alt+Z is claimed by the NVIDIA overlay on many Windows machines; Alt+X is
-  // rarely contested.
-  toggleHotkey: 'Alt+X',
+  // rarely contested. macOS doesn't deliver Option+letter global hotkeys (at
+  // least while Secure Input is on), but Option+Space fires.
+  toggleHotkey: isMac ? 'Alt+Space' : 'Alt+X',
   ingestHotkey: 'Alt+Shift+S',
   gridDetectHotkey: 'Alt+G',
   disableHardwareAcceleration: false
@@ -32,6 +35,12 @@ export function getSettings(): AppSettings {
     if (existsSync(p)) {
       const raw = JSON.parse(readFileSync(p, 'utf-8'))
       delete raw.artilleryHotkey // retired: artillery is a top-bar tab now
+      // Once, on macOS: the old Alt+X default never fires there. The marker is
+      // saved with the settings, so a later deliberate Alt+X is kept.
+      if (isMac && raw.toggleHotkey === 'Alt+X' && !raw.macToggleMigrated) {
+        raw.toggleHotkey = DEFAULTS.toggleHotkey
+        raw.macToggleMigrated = true
+      }
       next = { ...DEFAULTS, ...raw }
     }
   } catch {

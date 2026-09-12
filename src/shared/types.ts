@@ -29,21 +29,28 @@ export interface OverlayState {
   interactive: boolean
 }
 
-export type GridEdge = 'top' | 'bottom' | 'left' | 'right'
+/** Orientation of detected grid lines. */
+export type GridAxis = 'vertical' | 'horizontal'
 
-/** Map grid auto-detection from the screen edges. Positions are logical px. */
+/** Map grid auto-detection from strips across the screen. Positions are
+ *  logical px. A grid counts only with both vertical and horizontal lines. */
 export type GridDetectResult =
   | {
       ok: true
       /** One grid cell (line spacing + one line thickness). */
       cellPx: number
-      /** Screen x of one vertical grid line, if found on the top/bottom edge. */
-      xLine?: number
-      /** Screen y of one horizontal grid line, if found on the left/right edge. */
-      yLine?: number
-      edges: GridEdge[]
+      /** Screen x of one vertical grid line. */
+      xLine: number
+      /** Screen y of one horizontal grid line. */
+      yLine: number
     }
-  | { ok: false; reason: 'permission' | 'capture' | 'not-found'; error: string; edges: GridEdge[] }
+  | {
+      ok: false
+      reason: 'permission' | 'capture' | 'not-found'
+      error: string
+      /** Lines found anyway (not-found: at most one orientation). */
+      found: GridAxis[]
+    }
 
 /** Map watching started: `region` is the probed screen corner in window px,
  *  which the overlay must not draw into (it would end up in the capture).

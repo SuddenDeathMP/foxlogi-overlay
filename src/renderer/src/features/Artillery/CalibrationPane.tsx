@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { App as AntdApp } from 'antd'
 import { C } from '../../theme/graphite'
 import { useArtillery, type CalibrationKind } from './store'
-import { ARTY_SURFACE } from './ui'
+import { ARTY_SURFACE, HIT_FILL } from './ui'
 import { HEX_HEIGHT, MIN_HEX_DRAG_PX, calibrateFromHexHeight, calibrateFromRect, type Viewport } from './lib/viewport'
 import type { Vec } from './lib/vector'
 
@@ -69,7 +69,7 @@ export default function CalibrationPane({ vp, kind }: Props): React.ReactElement
 
   return (
     <div
-      style={{ position: 'fixed', inset: 0, zIndex: 10, pointerEvents: 'auto', cursor: 'crosshair' }}
+      style={{ position: 'fixed', inset: 0, zIndex: 10, pointerEvents: 'auto', background: HIT_FILL, cursor: 'crosshair' }}
       onContextMenu={(e) => {
         e.preventDefault()
         setCalibrating(false)

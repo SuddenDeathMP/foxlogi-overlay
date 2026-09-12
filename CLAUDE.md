@@ -50,7 +50,12 @@ Layout uses three "safe zones" (top banner / left / bottom strip) defined as dis
 ### Other main-process pieces
 
 - **Settings** (`src/main/settings.ts`): persisted to `userData/config.json`. The backend host is **fixed per build** (`https://foxlogi.com` packaged, `http://localhost:5173` dev) and force-overrides anything persisted — not user-configurable.
-- **Global hotkeys** (`src/main/hotkeys.ts`): toggle UI collapse (default `Alt+X`), clipboard ingest (default `Alt+Shift+S`) and artillery grid auto-detect (default `Alt+G`). Registration can fail if the game owns the combo; failures are pushed to the renderer as a warning, never silently ignored.
+- **Global hotkeys** (`src/main/hotkeys.ts`): toggle UI collapse (default `Alt+X`, `Alt+Space` on macOS), clipboard ingest (default `Alt+Shift+S`) and artillery grid auto-detect (default `Alt+G`). Registration can fail if the game owns the combo; failures are pushed to the renderer as a warning, never silently ignored.
+  - **macOS** can accept a `globalShortcut` registration that then never fires, so no warning shows. Measured on macOS 27 with Secure Input on (Electron 33 and 44 behave the same):
+    - Never fire: one modifier + a letter (`Alt+K`, `Control+K`, `Command+K`), `Alt+Shift+K`, `Alt+F5`.
+    - Fire: `Alt+Space`, `Control+Alt+K`, `Command+Shift+K`, `F5`, `Control+F5`.
+    - So the toggle defaults to `Alt+Space` there. `settings.ts` moves a persisted `Alt+X` to it once, with a `macToggleMigrated` marker. The ingest and grid-detect defaults don't fire there yet.
+  - **Secure Input** (e.g. 1Password, or a stuck Finder password prompt): while any app holds it, no event tap sees key presses, only modifier changes. `uiohook` hotkeys and the map watch's M/Esc go deaf then. Check with `IsSecureEventInputEnabled()` (HIToolbox); `ioreg -l -w 0 | grep SecureInput` can show a stale PID. Synthetic `CGEventPost` keys never reach `uiohook` either, so they can't test it.
 - **Clipboard ingest** (`src/main/clipboard/ingest.ts`): reads the clipboard asynchronously (`clipboard.readText()` returns a Promise since Electron 44), parses the game's stockpile clipboard export (TSV, tolerates CSV), detects the source type by row count, and pushes the parsed result to the renderer's `IngestSheet`.
 - **Auto-update** (`src/main/updater.ts`): electron-updater against the `publish` target in `electron-builder.yml`.
 
@@ -89,7 +94,9 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
   - **Grid cell:** sets `zoom = (w+h)/250` from one dragged 125 m grid cell and snaps the grid alignment.
   - **Hex height:** sets `zoom = dy / HEX_HEIGHT` from a vertical drag between a region hex's flat top and bottom edges. `HEX_HEIGHT` = 2197 m × 0.866 ≈ 1902.6 m, from fox-fall's `HEX_SIZE`. This works when the map is zoomed out too far for the game to draw its grid. It sets the scale only; the grid alignment stays as it was.
 - **Track the in-game map** (`hideWithMap`, persisted, on by default; a switch in the Settings drawer, saved with Save):
-  - While artillery is on, `useMapWatch` has main poll the screen (`src/main/overlay/mapWatch.ts`). Each capture is ~300 ms, followed by a 100 ms pause. Frames are captured at a height of 1080, so Retina and 1× screens look alike.
+  - While artillery is on, `useMapWatch` has main poll the screen (`src/main/overlay/mapWatch.ts`), with an 80 ms pause between reads.
+    - **macOS/Linux:** `desktopCapturer` grabs the whole display, ~300 ms per capture. Frames are captured at a height of 1080, so Retina and 1× screens look alike.
+    - **Windows:** `desktopCapturer` is far slower there, so only the icon corner is read: GDI `BitBlt` via `koffi` (`screenGrabWin.ts`) in a worker shared with grid detection (`screenGrab.ts` / `screenGrab.worker.ts`), milliseconds per read. If the worker fails, GDI is dropped for the app run; if 3 reads in a row come back all black (GDI can't see the game), for that watch. Either way `desktopCapturer` takes over.
   - Main matches the map's search icon (magnifier) in the top-right 60×60 corner (120×120 physical px at 2160p) with the pure `mapIcon.ts`. It uses normalized cross-correlation against an embedded 19×19 template: map screens score 0.89–1.0, anything else 0.68 or less, and the threshold is 0.8.
   - A single read above the threshold reports the map open. Polling alone reports it closed only after 2 reads below the threshold. Changes arrive as `push:mapOpen`, and App hides the overlay like a collapse while the map is closed. Hiding starts only after the map has been seen open once since artillery was turned on (`mapSeen`), so opening the tab with the map closed keeps the panel visible.
   - **Keys** (`gameInput.ts`, shared with `mapClicks.ts`): the map closes only with M or Esc, so a system-wide `uiohook-napi` hook listens for them without consuming them, which `globalShortcut` would do.
@@ -101,24 +108,35 @@ A renderer-only feature: no backend calls, and it works without an API key. It i
   - **Automatic grid re-detect** (`requestAutoDetect` in `autoDetect.ts`): one debounced, silent run of Auto-detect (no toasts). It fires:
     - when the map opens (150 ms);
     - when the Artillery tab is selected (400 ms);
-    - after the open map is wheel-zoomed. The same hook reports wheel steps, and main pushes `push:mapZoomed` once the wheel has been quiet for 600 ms. Wheel steps while our window is interactive are ours, so they're ignored.
+    - after the open map is wheel-zoomed. The same hook reports wheel steps, and main pushes `push:mapZoomed` once the wheel has been quiet for 400 ms. Wheel steps while our window is interactive are ours, so they're ignored.
+    - A run that doesn't find the grid is retried twice, 500 ms apart (the first try can land in the game's open or zoom animation). A newer request cancels the retries.
   - The toggle button or Alt+X shows the overlay anyway, until the map next opens or closes.
   - The watched corner comes back as `mapProbe`, and `ArtilleryLayer` clips it out, because our own drawings would otherwise be in the capture.
   - Watching pauses while collapsed, calibrating, or with Settings open.
 - **Auto-detect grid** crosses into main the same way:
   - The HUD button and the hotkey share one flow in `autoDetect.ts`, which calls `overlay.detectGrid()`.
-  - Main (`src/main/overlay/gridCapture.ts`) captures the display with `desktopCapturer`. During the capture it keeps our window out of the frame with `setContentProtection(true)`, so there's no blink. Linux has no such flag, so there the renderer fades the overlay (`html.capture-hidden`). In dev builds main saves the captured frame to `$TMPDIR/foxlogi-grid-capture.bmp`.
-  - It crops strips 10 logical px deep (20 physical on Retina) along the display edges and returns only numbers. Positions are converted into window coordinates, because on macOS the window sits below the menu bar.
+  - Main (`src/main/overlay/gridCapture.ts`) reads 28 thin strips across the whole display: 12 horizontal and 16 vertical, 10 logical px deep (20 physical on Retina), evenly spaced and including the edges (`stripLayout`). It returns only numbers. Positions are converted into window coordinates, because on macOS the window sits below the menu bar.
+    - Why the strips span the screen: the game draws the grid only inside the current region hex, so the screen edges often show no lines at all (outside the region, or across the label band).
+    - **Windows:** only the strips are read, with GDI through the shared `screenGrab.ts` worker (milliseconds). It falls back to `desktopCapturer` if the worker fails or every strip comes back black.
+    - **Elsewhere:** `desktopCapturer` captures the whole display at full resolution and the strips are cropped from it.
+    - During the capture main keeps our window out of the frame with `setContentProtection(true)`, so there's no blink. On Windows that covers GDI reads too. Linux has no such flag, so there the renderer fades the overlay (`html.capture-hidden`).
+    - In dev builds main saves the full frame to `$TMPDIR/foxlogi-grid-capture.bmp` (`%TEMP%` on Windows). On the GDI path it's read in the same call as the strips.
+    - The analysis runs in `gridDetect.worker.ts` (~70 ms at 4K, ~18 ms at 1080p), falling back to main if the worker can't run. Both workers use the small request/response helper in `workerRpc.ts`.
+  - The result is fitted to the viewport as it was when the frame was taken, and pans made since (map drags during the capture) are replayed on top. Otherwise the grid would snap back by the drag.
   - `gridDetect.ts` is pure and has no electron imports, so it can be run from a Node script on a screenshot.
-    - It keeps line candidates that match the game's lines: darker than the map, 2 px per logical px wide, a ~4% darkening present in at least 80% of the strip's rows.
-    - It picks one cell size across all edges by binomial significance. Opposite edges must agree on line positions, not just on the period.
-    - It then steps up from harmonics: a half- or third-size lattice also contains every real line.
-  - At least 2 edges must agree, or one very strong edge must be confirmed by the other axis. Tune the thresholds on real screenshots; the game's lines are only ~5–13 luma levels deep. On macOS this needs Screen Recording permission.
+    - Per strip it keeps line candidates that match the game's lines: darker than the map, 2 px per logical px wide, a ~4% darkening present in at least 80% of the strip's rows.
+    - Per axis it keeps positions that at least 2 parallel strips agree on (`consensusLines`). A grid line is straight across the screen; terrain and text aren't. Requiring 3 already loses grids that cover only part of the screen.
+    - It picks one cell size for both axes by binomial significance, then steps up from harmonics: a half- or third-size lattice also contains every real line.
+  - A grid counts only with both vertical and horizontal lines, so a success always carries both alignments (`xLine`, `yLine`).
+    - Both axes must be significant, or one very strong axis must be confirmed by the other.
+    - Each axis's lattice must also recur across its strips (`stripSupport`, p < 0.01). This rejects strips whose own periodic lines merely line up in two of them.
+  - Tune the thresholds on real screenshots; the game's lines are only ~5–13 luma levels deep. On macOS this needs Screen Recording permission.
 
 ## Platform constraints worth knowing
 
 - The game must run in **borderless windowed** mode — exclusive fullscreen bypasses the compositor and the overlay won't draw.
 - Windows: some GPUs render transparent windows as black; the `disableHardwareAcceleration` setting is applied before `app.whenReady()` as a fallback.
+- Windows hit-tests the transparent window per pixel: fully transparent pixels pass the mouse to the game even while the window is interactive. A full-screen surface that must take the mouse (calibration pane, Edit-mode capture fallback, the layer while a place menu is open) needs a fill with non-zero alpha, `HIT_FILL` in `Artillery/ui.ts`.
 - Linux: requires X11/XWayland; pure Wayland breaks always-on-top, click-through, global shortcuts and `getCursorScreenPoint`. Since Electron 38 the default is native Wayland, so the .desktop entries pass `--ozone-platform=x11` (electron-builder `executableArgs`) and `src/main/index.ts` relaunches a packaged app with that flag when it starts in a Wayland session without it. `app.commandLine.appendSwitch` can't do this: Ozone is chosen before main JS runs.
 - macOS: Electron 44 requires macOS 13+. `desktopCapturer` needs `NSAudioCaptureUsageDescription` in Info.plist (set via `mac.extendInfo`), even though we capture screens only.
 - `electron-builder.yml` sets `npmRebuild: false`. The native modules (`uiohook-napi`, `koffi`) ship N-API prebuilds, which work with any Electron version, while `@electron/rebuild`'s `node-abi` lags new Electron majors and fails the package step.
