@@ -58,6 +58,12 @@ const TIER_LABELS: Record<number, string> = {
   10: 'Keep'
 }
 
+// Bases created via the Stockpiler are named after their tier ("Relic Base"), and
+// ones created on the web map may have no name at all.
+function bunkerName(b: Bunker): string {
+  return b.name?.trim() || (b.tier && TIER_LABELS[b.tier]) || `Bunker #${b.id}`
+}
+
 // Normalize either {type_id: qty} or [{type:{id}, quantity}] to [typeId, qty][].
 function stockRows(stock: SupplyTask['stock'] | Recommendation['stock']): Array<[number, number]> {
   if (!stock) return []
@@ -117,18 +123,30 @@ export default function BunkerSupplyPanel(): React.ReactElement {
       .finally(() => setLoadingList(false))
   }, [])
 
-  const options = useMemo(
-    () =>
-      bunkers
-        .filter((b) => b.name?.toLowerCase().includes(query.toLowerCase()))
-        .slice(0, 20)
-        .map((b) => ({
-          value: b.name,
+  const options = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const nameCount = new Map<string, number>()
+    for (const b of bunkers) {
+      const name = bunkerName(b)
+      nameCount.set(name, (nameCount.get(name) ?? 0) + 1)
+    }
+    return bunkers
+      .filter((b) => {
+        const tier = (b.tier && TIER_LABELS[b.tier]) || ''
+        return [bunkerName(b), tier, b.description ?? ''].some((s) => s.toLowerCase().includes(q))
+      })
+      .map((b) => {
+        const name = bunkerName(b)
+        const tier = b.tier && TIER_LABELS[b.tier]
+        // Several bases can share a name, so the id tells them apart.
+        const title = `${name}${tier && tier !== name ? ` · ${tier}` : ''}${(nameCount.get(name) ?? 0) > 1 ? ` #${b.id}` : ''}`
+        return {
+          // Keyed by id: rc-select resolves a selection by value, so same-named
+          // bases would all select the same bunker.
+          value: String(b.id),
           label: (
             <div>
-              <div>
-                {b.tier && TIER_LABELS[b.tier] ? `${b.name} · ${TIER_LABELS[b.tier]}` : b.name}
-              </div>
+              <div>{title}</div>
               {b.description && (
                 <Text type="secondary" style={{ fontSize: 11, display: 'block' }} ellipsis>
                   {b.description}
@@ -137,9 +155,9 @@ export default function BunkerSupplyPanel(): React.ReactElement {
             </div>
           ),
           bunker: b
-        })),
-    [bunkers, query]
-  )
+        }
+      })
+  }, [bunkers, query])
 
   async function selectBunker(b: Bunker): Promise<void> {
     setSelected(b)
@@ -225,14 +243,19 @@ export default function BunkerSupplyPanel(): React.ReactElement {
           onSearch={setQuery}
           onChange={setQuery}
           placeholder="Find a bunker…"
-          onSelect={(_v, opt) => selectBunker((opt as { bunker: Bunker }).bunker)}
+          onSelect={(_v, opt) => {
+            const b = (opt as { bunker: Bunker }).bunker
+            // onChange has just put the option value (the id) in the input.
+            setQuery(bunkerName(b))
+            selectBunker(b)
+          }}
         />
 
         {selected && (
           <>
             <Flex align="center" gap={6} wrap>
               <Text strong style={{ fontSize: 13 }} ellipsis>
-                {selected.name}
+                {bunkerName(selected)}
               </Text>
               <Tag color={status === STATUS.PREPARING ? 'default' : 'processing'}>{statusName}</Tag>
               {busy && <Spin size="small" />}
@@ -355,7 +378,7 @@ export default function BunkerSupplyPanel(): React.ReactElement {
             <span style={cardLabelStyle}>
               {status === STATUS.PICKING_UP
                 ? `Pick up — ${task?.pickup_location?.name ?? ''}`
-                : `Deliver to ${selected.name}`}
+                : `Deliver to ${bunkerName(selected)}`}
             </span>
             <div style={{ height: 1, background: C.line1, margin: '8px 0', flexShrink: 0 }} />
             <div style={cardListStyle}>
